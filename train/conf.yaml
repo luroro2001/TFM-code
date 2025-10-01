@@ -1,0 +1,18 @@
+training:
+    noise: 3.0e-4
+    batch_size: 1024
+    gpu: 0
+    smooth: 0.05
+    n_epochs: 1000
+    lr: 3.0e-4
+    warmup: 10
+    weight_decay: 0.0
+    use_decoders: True
+
+mlp:
+    n_hidden_mlp: 256
+    num_layers_mlp: 5
+    decoders: True
+    latent_dim: 64
+    dropout_probability: 0.1
+    

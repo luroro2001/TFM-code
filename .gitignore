@@ -1,0 +1,21 @@
+# Virtual environments
+.venv/
+.venv-*/
+ENV/
+env/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Data and models (if you don’t want them in GitHub)
+database/
+*.h5
+*.ckpt
+checkpoints/
+
+# System/editor files
+.DS_Store
+*.swp

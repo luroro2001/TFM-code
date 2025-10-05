@@ -2,6 +2,10 @@ import torch
 import numpy as np
 import torch.nn as nn
 
+
+# L: takes an input vector v ∈ R^(n_input) and maps it into a higher-dimensional space.
+# Uses logarithmically spaced frequencies (σ^(j/m)), meaning both low- and high-frequency 
+# variations are captured.
 class PositionalEncoding(nn.Module):
     """Positional encoding for the input vector
 
@@ -42,7 +46,8 @@ class PositionalEncoding(nn.Module):
 
         return out
         
-    
+
+# L: Projects the input v into a random Fourier space using a gaussian matrix B   
 class GaussianEncoding(nn.Module):
     def __init__(self, input_size, encoding_size, sigma=None):
         super().__init__()
@@ -80,6 +85,7 @@ class GaussianEncoding(nn.Module):
 
         return out
 
+# L: does nothing, simply returns the input v
 class IdentityEncoding(nn.Module):
     def __init__(self, input_size):
         super().__init__()

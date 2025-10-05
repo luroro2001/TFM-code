@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as pl # L: had to add it 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,9 +22,21 @@ import logging
 import yaml
 import argparse
 from einops import rearrange
+from PIL import Image, ImageDraw # L: had to add it
 
+"""
+Summary:
+This script uses a CLIP contrastive training loop that learns to align two modalities:
+- Stokes profiles (input from Dataset): 4x112 wavelengths, flattened to 4*112
+- Models (physical parameters): 6x80 layers, flattened to 6*80 
+It uses two encoders (encoder_stokes and encoder_models) to map these into a common latent
+space (latent_dim) and optimizes a symmetric contrastives loss (CLIP). Optionally it also
+uses decoders and saves checkpoints.
+
+"""
 
 def merge_images(image_batch, size, labelsy=None, labelsx=None):
+    # DUDA: when is this used? and for what purpose?  
     b, h, w = image_batch.shape    
     img = np.zeros((int(h*size[0]), int(w*size[1])))
     for idx in range(b):
@@ -48,12 +61,14 @@ def merge_images(image_batch, size, labelsy=None, labelsx=None):
 class CLIPLoss(nn.Module):
     """
     Simple contrastive loss for CLIP
+    DUDA: attempt to get a deeper understanding.
     """
     def __init__(self):
         super().__init__()        
 
     def get_logits(self, z1_features, z2_features, logit_scale):
         logits_per_z1 = logit_scale * z1_features @ z2_features.T
+        # L: z1 @ z2 prduces pairwise cosine similarity matrix 
         logits_per_z2 = logit_scale * z2_features @ z1_features.T
         return logits_per_z1, logits_per_z2
 
@@ -70,7 +85,7 @@ class CLIPLossMultiModal(nn.Module):
     """
     def __init__(self, n=2):
         super().__init__()
-        self.n = n
+        self.n = n # L: modalities
         self.nclip = (n * (n-1) // 2)
         self.loss = [None] * self.nclip
 
@@ -80,6 +95,7 @@ class CLIPLossMultiModal(nn.Module):
         return logits_per_z1, logits_per_z2
 
     def forward(self, z1_features, z2_features, z3_features, logit_scale):
+        # DUDA: even for the case n=2 you must input z3_features? That doesn't seem ideal
         
         logits_per_z1, logits_per_z2 = self.get_logits(z1_features, z2_features, logit_scale)        
         labels = torch.arange(logits_per_z1.shape[0], device=z1_features.device, dtype=torch.long)
@@ -105,8 +121,8 @@ class Training(nn.Module):
 
         super().__init__()
 
-        # Read configuration file
-        with open(config_file, 'r') as f:
+        # Read configuration file 
+        with open(config_file, 'r') as f: # L: given at the end (in main)
             self.config = yaml.safe_load(f)
 
         # Define the logger for output
@@ -176,10 +192,12 @@ class Training(nn.Module):
                         dropout_probability=self.config['mlp']['dropout_probability'],
                         use_batch_norm=True).to(self.device)
         
-                        
+        # L: this creates  a scalar learnable parameter initialized to log(1/0.07)
+        # in forward pass they use F.softplus(self.logit_scale) to map it to a positive value                
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))#)
         # self.logit_scale = torch.ones([]) * np.log(1 / 0.07)
-                
+
+        # L: prints num. of trainable parameters         
         self.logger.info('N. total parameters STOKES ENCODER : {0}'.format(sum(p.numel() for p in self.encoder_stokes.parameters() if p.requires_grad)))
         self.logger.info('N. total parameters MODELS ENCODER : {0}'.format(sum(p.numel() for p in self.encoder_models.parameters() if p.requires_grad)))
 
@@ -395,6 +413,7 @@ class Training(nn.Module):
         return
 
     def validate(self):
+        # L: put models in evaluation mode 
         self.encoder_stokes.eval()
         self.encoder_models.eval()
         if (self.decoders):

@@ -23,7 +23,15 @@ import h5py
 import pynndescent
 import os
 import pickle
-    
+
+"""
+This script defines a Training class for zero-shot inversion of solar Stokes images using 
+pre-trained neural networks. It loads ResNet-based encoders and decoders, encodes Stokes images 
+into latent vectors, performs nearest-neighbor (k-NN) search in latent space, reconstructs both 
+Stokes images and physical models (temperature, velocity, magnetic fields), and generates comparison plots.
+
+The workflow is designed to either process synthetic data (project_obs) or Hinode-reconstructed data (project_hinode).
+"""    
     
 class Training(object):
     def __init__(self, checkpoint, gpu, batch_size):

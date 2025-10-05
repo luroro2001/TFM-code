@@ -3,33 +3,46 @@ import torch.utils.data
 import h5py
 import numpy as np
 
+# L: scales input data x from range [xmin, xmax] to [-1,1]
+# L: nn train better when inputs are normalized
 def normalize_input(x, xmin, xmax):
-    return 2.0 * (x - xmin) / (xmax - xmin) - 1.0
+    return 2.0 * (x - xmin) / (xmax - xmin) - 1.0 #L: linear scalng formula
 
+
+# L: reverts normalized values from [-1,1] back to [xmin, xmax]
 def denormalize_output(x, xmin, xmax):
-    return 0.5 * (x + 1.0) * (xmax - xmin) + xmin
+    return 0.5 * (x + 1.0) * (xmax - xmin) + xmin # L: despejando x de la funcion anterior
 
 class Dataset(torch.utils.data.Dataset):
     """
     Dataset class that will provide data during training. Modify it accordingly
     for your dataset. This one shows how to do augmenting during training for a 
-    very simple training set    
+    very simple training set 
+
+    L: This class provides both stokes profiles and physical model parameters for training.   
     """
     def __init__(self, filename_stokes, filename_model, good_profiles_filename, n_training=None, noise=0.0):
         """
-        Very simple training set made of 200 Gaussians of width between 0.5 and 1.5
-        We later augment this with a velocity and amplitude.
+        ?? Very simple training set made of 200 Gaussians of width between 0.5 and 1.5
+        ?? We later augment this with a velocity and amplitude.
         
         Args:
             n_training (int): number of training examples including augmenting
+            # L:
+            filename_stokes: HDF5 file with Stokes I, Q, U, V profiles
+            filename model: HDF5 file with the physical model parameters (temp, vel, B_i, etc)
+            good_profiles_filename: .npy file indexing 'good' profiles to use
+            noise: amount of gaussian noise to add 
         """
         super(Dataset, self).__init__()
 
         self.noise = noise
 
+        # L: opens the hdf5 files containing the data
         f_stokes = h5py.File(f'../database/{filename_stokes}', 'r')
         f_model = h5py.File(f'../database/{filename_model}', 'r')
 
+        # L: loads indices of good profiles (filtering purposes)
         ind = np.load(f'../database/{good_profiles_filename}')
 
         # Models contain the following parameters:
@@ -44,11 +57,13 @@ class Dataset(torch.utils.data.Dataset):
 
         self.model = np.transpose(self.model, (0, 2, 1))
         
+        # L: sets dataset length: either all available samples or a subset
         if n_training is None:
             self.n_training = self.stokes.shape[0]
         else:
             self.n_training = n_training
-                
+
+        # L: normalization bounds (min and max values?). Later used in normalize_input()        
         self.lower_stokesI = 0.0
         self.upper_stokesI = 2.5
 
@@ -64,6 +79,7 @@ class Dataset(torch.utils.data.Dataset):
         self.lower_T = 2000
         self.upper_T = 25000
 
+        # L: 'vmic' is microturbulent velocity
         self.lower_vmic = 0.0
         self.upper_vmic = 3.0
 
@@ -79,10 +95,11 @@ class Dataset(torch.utils.data.Dataset):
         self.lower_Bz = -1000.0
         self.upper_Bz = 1000.0
                 
-    def __getitem__(self, index):
+    def __getitem__(self, index): # L: called for each sample during training
 
         # Add noise and normalize Stokes QUV by Stokes I
-        out_stokesI = self.stokes[index, 0, 0, :]
+        #(L: converts polarization signals into fractional polarizaion (Q/I, U/I, V/I), standard in spectropolarimetry)
+        out_stokesI = self.stokes[index, 0, 0, :] # L: gets Stokes I for the given index
         if self.noise != 0:
             out_stokesI += np.random.normal(0, self.noise, out_stokesI.shape)
 
@@ -101,11 +118,14 @@ class Dataset(torch.utils.data.Dataset):
             out_stokesV += np.random.normal(0, self.noise, out_stokesV.shape)
         out_stokesV /= out_stokesI
 
+        # L: rescales all inputs into [-1, 1] for neural network stability
         out_stokesI = normalize_input(out_stokesI, self.lower_stokesI, self.upper_stokesI)        
         out_stokesQ = normalize_input(out_stokesQ, self.lower_stokesQ, self.upper_stokesQ)
         out_stokesU = normalize_input(out_stokesU, self.lower_stokesU, self.upper_stokesU)
         out_stokesV = normalize_input(out_stokesV, self.lower_stokesV, self.upper_stokesV)
 
+        # L: Repeats for temperature (T), microturbulent velocity (vmic), 
+        # LOS velocity (v), magnetic field components (Bx, By, Bz). 
         out_T = self.model[index, 1, :]
         out_T = normalize_input(out_T, self.lower_T, self.upper_T)
 
@@ -128,14 +148,17 @@ class Dataset(torch.utils.data.Dataset):
         return out_stokes.astype('float32'), out_model.astype('float32')
 
     def __len__(self):
-        return self.n_training
+        return self.n_training # L:returns number of samples in the dataset
     
 
 class DatasetHinode(torch.utils.data.Dataset):
     """
     Dataset class that will provide data during training. Modify it accordingly
     for your dataset. This one shows how to do augmenting during training for a 
-    very simple training set    
+    very simple training set    .
+
+    L: similar to Dataset but tailored for real Hinode solar data (no physical model parameters).
+    I imagine this is used during validation.
     """
     def __init__(self, filename_stokes, startx=0, starty=0, nx=0, ny=0):
         """
@@ -153,6 +176,7 @@ class DatasetHinode(torch.utils.data.Dataset):
         if nx == 0 or ny == 0:
             nx, ny = f_stokes['stokes'].shape[1:3]
 
+        # L: extracts subsets from 2D solar images
         self.stokes = f_stokes['stokes'][:, startx:startx+nx, starty:starty+ny, :]
         
         x = np.arange(nx)
@@ -200,5 +224,6 @@ class DatasetHinode(torch.utils.data.Dataset):
     
 if __name__ == "__main__":
     dataset = Dataset('stokes_training.h5', 'models_training.h5', 'good_profiles_training.npy', n_training=1000, noise=0.0)
+    # L: prints first sample and its size to see if the dataset has loaded correctly, Ig.
     print(dataset[0])
     print(len(dataset))

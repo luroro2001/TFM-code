@@ -5,6 +5,8 @@ import numpy as np
 import matplotlib.pyplot as pl
 from encoding import GaussianEncoding, PositionalEncoding
 
+# NOTA: There are some undefined things here
+
 def init_kaiming(m):
     if type(m) == nn.Linear:
         init.kaiming_uniform_(m.weight, nonlinearity='relu')
@@ -48,10 +50,10 @@ class MLP(nn.Module):
 
         self.initial_layer = nn.Linear(n_input, dim_hidden, bias=bias)
 
-        self.hidden_layers = nn.ModuleList([])        
+        self.hidden_layers = nn.ModuleList([])  # L: uses list to store number of hidden layers    
 
         if (self.bn_active):
-            self.bn = nn.ModuleList([])
+            self.bn = nn.ModuleList([]) # L: optionally adds batch normalization after each
         
         for i in range(n_hidden):
             self.hidden_layers.append(nn.Linear(dim_hidden, dim_hidden, bias=bias))

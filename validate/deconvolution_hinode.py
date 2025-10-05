@@ -14,6 +14,12 @@ from kornia.filters import median_blur, spatial_gradient
 from nvitop import Device
 import platform
 
+"""
+L: Defines a class Classic for performing image deconvolution specifically for Hinode 
+solar telescope data. It uses Fourier-space filtering and gradient based optimization to 
+reconstruct images from observed data using a given PSF.
+"""
+
 class Classic(nn.Module):
     def __init__(self, config):
         """

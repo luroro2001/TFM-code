@@ -3,6 +3,8 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn import init
 
+# L: I assume ResidualNet can model spectral profiles (1D) and ConvResidualNet can 
+# model Stokes parameters' maps or images from telescopes 
 
 class ResidualBlock(nn.Module):
     """A general-purpose residual block. Works only with 1-dim inputs."""

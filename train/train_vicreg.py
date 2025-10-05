@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as pl # L: had to add it 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,6 +22,7 @@ import logging
 import yaml
 import argparse
 from einops import rearrange
+from PIL import Image, ImageDraw # L: had to add it
 
 
 def merge_images(image_batch, size, labelsy=None, labelsx=None):
@@ -82,7 +84,14 @@ class VICReg(nn.Module):
         return loss, self.inv_coeff * loss_inv, self.var_coeff * loss_var, self.cov_coeff * loss_cov
 
 def off_diagonal(x):
-    n, m = x.shape
+    """
+    L:
+    Extracts the off-diagonal elements of a matrix. In VICReg, one of the loss terms is
+    the covariance regularization, which penalizes corrs. between diff. feature dimensions
+    (encouraging them to be decorrelated). This function provides those i=!j terms from the
+    covariance matrix
+    """
+    n, m = x.shape # L: ensures x is square (n==m)
     assert n == m
     return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
 

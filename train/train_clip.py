@@ -24,6 +24,8 @@ import argparse
 from einops import rearrange
 from PIL import Image, ImageDraw # L: had to add it
 
+NVITOP = False # L: added
+
 """
 Summary:
 This script uses a CLIP contrastive training loop that learns to align two modalities:

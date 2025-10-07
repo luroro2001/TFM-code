@@ -58,10 +58,18 @@ class Testing(object):
         self.device = torch.device(f"cuda:{self.gpu}" if self.cuda else "cpu")
 
         if (NVIDIA_SMI):
-            self.handle = Device.all()[self.gpu]
-            
-            print("Computing in {0} : {1}".format(self.device, self.handle.name()))
-        
+            try:
+                self.handle = Device.all()[self.gpu]
+                print("Computing in {0} : {1}".format(self.device, self.handle.name()))
+            except Exception:
+                print("NVIDIA device not found, running on CPU instead.")
+                self.device = torch.device("cpu")
+                self.handle = None
+            else:
+                print("Running on CPU (no GPU or NVML detected).")
+                self.device = torch.device("cpu")
+                self.handle = None
+
         self.batch_size = batch_size
         self.decoders = self.config['training']['use_decoders']
         

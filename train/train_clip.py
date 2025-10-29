@@ -24,7 +24,7 @@ import argparse
 from einops import rearrange
 from PIL import Image, ImageDraw # L: had to add it
 
-NVITOP = False # L: added
+#NVITOP = False # L: added
 
 """
 Summary:

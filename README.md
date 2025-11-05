@@ -105,7 +105,7 @@ Finally, the script does a quick test to see if the dataset loads correctly and 
 
 # **`train directory`**
 
-## **`train_clip.py'**
+## **`train_clip.py`**
 
 This script uses a CLIP contrastive learning training loop that learns to align two modalities:
 - Stokes profiles: 4x112 wavelengths, flattened to 4*112 (4 parameters sampled in 112 points).
@@ -114,13 +114,24 @@ It uses two encoders (encoder_stokes and encoder_models) to map these into a com
 
 **Note**: The code starts off by defining `merge_images', which isn't actually used anywhere.
 
-### **'CLIPLoss'**
+### **`CLIPLoss class`**
 
 Simple contrastive loss.
 **PENDING**: get a deeper understanding.
 
-### **'CLIPLossMultiModal'**
+### **`CLIPLossMultiModal class`**
 
 Supports multi-modal contrastive learning between 'n' modalities (implemented for n=2 and n=3).
 
-### **'Training'** 
+### **`Training class`** 
+
+- Reads the hyperparameters from the configuration file 'config.yaml', which is given in the main function at the end. Then defines a logger 'training' for output and sets up a console handler. Checks if GPU is available (in which case, its usage will be monitored) and decides the computing device (GPU/CPU).
+
+- Definition of the neural networks: encoders and decoders are defined for the models and Stokes profiles. Both sets are defined as `resnet.ResidualNet` (see `modules` directory) instances, with parameters:
+    - `in_features`: 
+        - `encoder_models`: 6*80 (6 model params x 80 sampled points).
+        - `encoder_stokes`: 4*112 (4 Stokes params x 112 sampled wavelengths).
+    - `out_features`: latent_dim from the config file (embedding dimension).
+    - **ETCETERA**.
+
+It might be better if I simply use this for brief summaries/overviews of how each script works and what it does, and leave the exhaustive explanatory comments for the code itself.

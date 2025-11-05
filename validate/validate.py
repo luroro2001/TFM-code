@@ -10,8 +10,15 @@ try:
 except:
     NVIDIA_SMI = False
 import matplotlib.pyplot as pl
+#import matplotlib
+#matplotlib.use('Agg') # test, did not fix the issue
 import sys
-sys.path.append('../modules')
+import os
+#sys.path.append('../modules')
+# to fix issues with imports:
+MODULES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'modules')
+sys.path.append(MODULES_PATH)
+print(f"Added to sys.path: {MODULES_PATH}")
 import resnet
 import dataset
 import normalize
@@ -19,6 +26,7 @@ import symlog
 import resnet
 import glob
 from einops import rearrange
+import random 
 
 def normalize_input(x, xmin, xmax):
     return 2.0 * (x - xmin) / (xmax - xmin) - 1.0
@@ -129,6 +137,10 @@ class Testing(object):
         if self.decoders:
             self.decoder_models.load_state_dict(chk['decoder_models_dict'])
             self.decoder_stokes.load_state_dict(chk['decoder_stokes_dict'])
+
+            #L: also put decoders in evaluation mode for plot_reconstruction
+            self.decoder_models.eval()
+            self.decoder_stokes.eval()
         
     def denormalize(self, models):
         lower = [2000., 0.0, -10.0, 0.0, -1000.0, -1000.0]
@@ -206,6 +218,52 @@ class Testing(object):
 
         return z_stokes, z_models, models_all, stokes_all, decoded_models_all, decoded_stokes_all
 
+    def plot_reconstruction(self, stokes, decoded_stokes, models, decoded_models, n_samples=3):
+        """
+        Plot the original (before latent space) vs reconstructed (decoded) Stokes and model parameters
+        for a few random samples to check how well it works.
+        """
+
+        n_total = stokes.shape[0] # number of available samples in dataset
+        # randomly choose which ones to visualize (without exceeding total)
+        indices = random.sample(range(n_total), min(n_samples, n_total))
+
+        stokes_labels = ["I", "Q", "U", "V"]
+        model_labels = ["T", "vmic", "v", "Bx", "By", "Bz"]
+
+        for idx in indices:
+            fig, axes = pl.subplots(2,1, figsize=(10,8))
+            #fig.suptitle(f'Sample {idx}', fontsize=14, fontweight='bold')
+
+            # plot the Stokes profiles
+            ax = axes[0]
+            for s in range(4): # Stoke parameter
+                ax.plot(stokes[idx, s], label=f'{stokes_labels[s]}')
+                ax.plot(decoded_stokes[idx, s], "--", label=f'{stokes_labels[s]} (decoded)')
+            ax.set_title("Stokes profiles")
+            ax.set_xlabel("Wavelength index")
+            ax.set_ylabel("Intensity")
+            ax.legend(fontsize=8)
+            #ax.grid(alpha=0.3)
+
+            # plot the model parameters
+            ax = axes[1]
+            for m in range(6):
+                ax.plot(models[idx, m], label=f'{model_labels[m]}')
+                ax.plot(decoded_models[idx, m], "--", label=f'{model_labels[m]} (decoded)')
+            ax.set_title("Model parameters")
+            ax.set_xlabel("Depth index")
+            ax.set_ylabel("Value")
+            ax.legend(fontsize=8, ncol=3)
+            #ax.grid(alpha=0.3)
+
+            pl.tight_layout(rect=[0, 0, 1, 0.96])
+            #pl.show()
+            output_file = f"reconstruction_sample_{idx}.pdf"
+            pl.savefig(output_file, dpi=150)
+            print(f"Saved {output_file}")
+            pl.close()
+
 
 if (__name__ == '__main__'):
 
@@ -215,3 +273,5 @@ if (__name__ == '__main__'):
     
     deepnet = Testing(checkpoint, gpu=0, batch_size=1024)
     z_stokes, z_models, models, stokes, decoded_models, decoded_stokes = deepnet.test()
+
+    deepnet.plot_reconstruction(stokes, decoded_stokes, models, decoded_models, n_samples=3)

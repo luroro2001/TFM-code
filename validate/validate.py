@@ -220,8 +220,8 @@ class Testing(object):
 
     def plot_reconstruction(self, stokes, decoded_stokes, models, decoded_models, n_samples=3):
         """
-        Plot the original (before latent space) vs reconstructed (decoded) Stokes and model parameters
-        for a few random samples to check how well it works.
+        Plot the original (before latent space) vs decoded Stokes and model parameters
+        for a few random samples to check how well reconstruction works.
         """
 
         n_total = stokes.shape[0] # number of available samples in dataset

@@ -368,7 +368,10 @@ class Training(nn.Module):
                 loss_models = torch.tensor(0.0).to(self.device)
 
             # Total loss
-            loss = loss_clip + loss_stokes + loss_models
+            weight_clip = 0
+            weight_stokes = 1
+            weight_models = 1
+            loss = weight_clip*loss_clip + weight_stokes*loss_stokes + weight_models*loss_models
 
             # Backpropagation                    
             loss.backward()

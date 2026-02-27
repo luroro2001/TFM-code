@@ -64,8 +64,10 @@ class Dataset(torch.utils.data.Dataset):
             self.n_training = n_training
 
         # L: normalization bounds (min and max values?). Later used in normalize_input()        
-        self.lower_stokesI = 0.0
-        self.upper_stokesI = 2.5
+        #self.lower_stokesI = 0.0
+        #self.upper_stokesI = 2.5
+        self.lower_stokesI = 0.8
+        self.upper_stokesI = 1.2
 
         self.lower_stokesQ = -1e-2
         self.upper_stokesQ = 1e-2
@@ -73,8 +75,11 @@ class Dataset(torch.utils.data.Dataset):
         self.lower_stokesU = -1e-2
         self.upper_stokesU = 1e-2
 
-        self.lower_stokesV = -1e-2
-        self.upper_stokesV = 1e-2
+        #self.lower_stokesV = -1e-2
+        #self.upper_stokesV = 1e-2
+
+        self.lower_stokesV = -5e-2
+        self.upper_stokesV = 5e-2
 
         self.lower_T = 2000
         self.upper_T = 25000

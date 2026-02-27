@@ -27,6 +27,9 @@ import resnet
 import glob
 from einops import rearrange
 import random 
+#import time
+#import pathlib
+from datetime import datetime
 
 def normalize_input(x, xmin, xmax):
     return 2.0 * (x - xmin) / (xmax - xmin) - 1.0
@@ -213,8 +216,9 @@ class Testing(object):
         decoded_models_all = np.concatenate(decoded_models_all, axis=0) if self.decoders else None
         decoded_stokes_all = np.concatenate(decoded_stokes_all, axis=0) if self.decoders else None
 
-        models_all = self.denormalize(models_all)
-        decoded_models_all = self.denormalize(decoded_models_all) if self.decoders else None
+        # THIS CAUSES THE MODEL PARAMS TO BE IN PHYSICAL UNITS IN THE PLOT
+        #models_all = self.denormalize(models_all)
+        #decoded_models_all = self.denormalize(decoded_models_all) if self.decoders else None
 
         return z_stokes, z_models, models_all, stokes_all, decoded_models_all, decoded_stokes_all
 
@@ -231,9 +235,16 @@ class Testing(object):
         stokes_labels = ["I", "Q", "U", "V"]
         model_labels = ["T", "vmic", "v", "Bx", "By", "Bz"]
 
+        # create the directory to save the figures, with date in the name
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        self.output_dir = os.path.join(os.path.dirname(__file__), f"weight_trial_{timestamp}")
+        os.makedirs(self.output_dir, exist_ok=True)
+        print(f"Saving validation plots to folder: {self.output_dir}")
+
         for idx in indices:
             fig, axes = pl.subplots(2,1, figsize=(10,8))
             #fig.suptitle(f'Sample {idx}', fontsize=14, fontweight='bold')
+            fig.suptitle(f'Weights: w_clip=0, w_stokes=1, w_models=1')
 
             # plot the Stokes profiles
             ax = axes[0]
@@ -242,7 +253,7 @@ class Testing(object):
                 ax.plot(decoded_stokes[idx, s], "--", label=f'{stokes_labels[s]} (decoded)')
             ax.set_title("Stokes profiles")
             ax.set_xlabel("Wavelength index")
-            ax.set_ylabel("Intensity")
+            ax.set_ylabel("Normalized intensity")
             ax.legend(fontsize=8)
             #ax.grid(alpha=0.3)
 
@@ -259,7 +270,8 @@ class Testing(object):
 
             pl.tight_layout(rect=[0, 0, 1, 0.96])
             #pl.show()
-            output_file = f"reconstruction_sample_{idx}.pdf"
+            #output_file = f"reconstruction_sample_{idx}.pdf"
+            output_file = os.path.join(self.output_dir, f"sample_{idx}.pdf")
             pl.savefig(output_file, dpi=150)
             print(f"Saved {output_file}")
             pl.close()

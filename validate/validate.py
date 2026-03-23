@@ -181,8 +181,19 @@ class Testing(object):
         with torch.no_grad():
 
             for batch_idx, (stokes, models) in enumerate(t):
-                models = models.to(self.device)
-                stokes = stokes.to(self.device)
+                models = models.to(self.device) # shape (batch size, 6, 80)
+                stokes = stokes.to(self.device) # shape (batch size, 4, 112) 
+
+                # L: use the einops.rearrange function to flatten the spatial/spectral 
+                # dimensions of the input tensors into a single dimension, preparing them for 
+                # input to the neural network encoders.
+                # 'b c h -> b (c h)' keeps the batch dim. unchanged and flattens the last 
+                # two dimensions c and h into a single dimension (c h)
+
+                # This flattening is required because the ResNet encoders are defined with
+                # specific input dimensions: they expect 1D feature vectors, not 2D spatial/spectral data.
+                # The flattening converts each sample from a 2D profile (channels × spatial points) 
+                # into a single long vector that the neural network can process.
 
                 stokes_flat = rearrange(stokes, 'b c h -> b (c h)')
                 models_flat = rearrange(models, 'b c h -> b (c h)')
@@ -190,7 +201,7 @@ class Testing(object):
                 z_s = self.encoder_stokes(stokes_flat)
                 z_m = self.encoder_models(models_flat)
 
-                z_s = F.normalize(z_s, dim=-1)
+                z_s = F.normalize(z_s, dim=-1) # L2 normalization along the last dimension ( the feature dimension), ensuring each embedding has unit length (norm=1)
                 z_m = F.normalize(z_m, dim=-1)
 
                 z_stokes.append(z_s.cpu().numpy())
@@ -454,24 +465,298 @@ class Testing(object):
         print(f"Saved {filename}")
         pl.close()
 
+
+
+    def fast_stokes_synthesis(self, models_all, stokes_all, n_ball=0, ball_sigma=0.02):
+        """
+        Fast Stokes synthesizer: Model -> z -> decoder_stokes -> Stokes (step 4b).
+
+        For each physical model in the test set, encodes it into the latent space
+        using encoder_models, then decodes back to Stokes profiles using decoder_stokes.
+        Optionally also probes the local latent space around each z by sampling a 
+        small Gaussian 'ball' (your tutor's suggestion) to assess output sensitivity.
+
+        Args:
+            models_all   : np.ndarray, shape (N, 6, 80)  — normalized model parameters
+            stokes_all   : np.ndarray, shape (N, 4, 112) — normalized Stokes profiles (ground truth)
+            n_ball       : int — number of perturbed z samples per profile for the ball experiment.
+                        Set to 0 to skip it entirely.
+            ball_sigma   : float — std dev of the Gaussian perturbation applied to z for the ball.
+
+        Returns:
+            dict with:
+                'synthesized_stokes' : np.ndarray (N, 4, 112) — predicted Stokes profiles
+                'residuals'          : np.ndarray (N, 4, 112) — pointwise residuals (pred - true)
+                'rms_per_profile'    : np.ndarray (N, 4)      — RMS error per Stokes component per sample
+                'rms_per_component'  : np.ndarray (4,)        — mean RMS across all samples per component
+                'ball_decoded'       : np.ndarray (N, n_ball, 4, 112) or None — Stokes decoded from
+                                    perturbed z vectors around each sample's latent point
+        """
+
+        if not self.decoders:
+            raise RuntimeError("fast_stokes_synthesis() requires decoders (use_decoders=True in config).")
+
+        print("Running fast Stokes synthesis (4b): model -> z -> decoder_stokes ...")
+
+        # Convert numpy arrays to tensors and build a simple DataLoader
+        # so we process in batches (consistent with how test() works)
+        models_tensor = torch.tensor(models_all, dtype=torch.float32)
+        stokes_tensor = torch.tensor(stokes_all, dtype=torch.float32)
+
+        loader = torch.utils.data.DataLoader(
+            torch.utils.data.TensorDataset(models_tensor, stokes_tensor),
+            batch_size=self.batch_size,
+            shuffle=False
+        )
+
+        synthesized_list = []
+        ball_decoded_list = []  # will stay empty if n_ball == 0
+
+        with torch.no_grad():
+            for models_batch, _ in tqdm(loader, desc="Synthesizing Stokes"):
+
+                models_batch = models_batch.to(self.device)
+
+                # Flatten: (B, 6, 80) -> (B, 480) — mirrors the rearrange in train/test
+                models_flat = rearrange(models_batch, 'b c h -> b (c h)')
+
+                # Encode physical models into latent space
+                z = self.encoder_models(models_flat)
+                z = F.normalize(z, dim=-1)  # unit-norm normalization, consistent with training
+
+                # Decode latent vectors back to Stokes space using the Stokes decoder
+                # This is the cross-modal decode: we encoded models but decode as Stokes
+                synth_flat = self.decoder_stokes(z)
+
+                # Reshape back to (B, 4, 112)
+                synth = rearrange(synth_flat, 'b (c h) -> b c h', c=4)
+                synthesized_list.append(synth.cpu().numpy())
+
+                # ---- Ball experiment (optional) ----
+                # For each sample in the batch, draw n_ball small Gaussian perturbations
+                # around its latent point z and decode each one. This shows how
+                # sensitive the output Stokes profiles are to small movements in z-space.
+                if n_ball > 0:
+                    B = z.shape[0]
+                    # z shape: (B, latent_dim) -> expand to (B, n_ball, latent_dim)
+                    z_expanded = z.unsqueeze(1).expand(B, n_ball, -1)  # (B, n_ball, latent_dim)
+
+                    # Sample Gaussian noise of the same shape
+                    noise = torch.randn_like(z_expanded) * ball_sigma
+
+                    # Perturb and re-normalize (keep vectors on the unit sphere, consistent with training)
+                    z_perturbed = F.normalize(z_expanded + noise, dim=-1)  # (B, n_ball, latent_dim)
+
+                    # Flatten the batch and ball dims to decode everything in one forward pass
+                    z_perturbed_flat = rearrange(z_perturbed, 'b n d -> (b n) d')
+                    ball_flat = self.decoder_stokes(z_perturbed_flat)  # (B*n_ball, 4*112)
+                    ball_profiles = rearrange(ball_flat, '(b n) (c h) -> b n c h', b=B, c=4)
+                    ball_decoded_list.append(ball_profiles.cpu().numpy())
+
+        # Concatenate across all batches
+        synthesized_stokes = np.concatenate(synthesized_list, axis=0)  # (N, 4, 112)
+
+        # ---- Compute residuals and RMS ----
+        # Residuals: pointwise difference between synthesized and ground-truth Stokes
+        residuals = synthesized_stokes - stokes_all  # (N, 4, 112)
+
+        # RMS per sample per Stokes component: sqrt(mean over wavelength axis)
+        rms_per_profile = np.sqrt(np.mean(residuals**2, axis=2))  # (N, 4)
+
+        # Mean RMS over the entire test set for each Stokes component: one number per I/Q/U/V
+        rms_per_component = np.mean(rms_per_profile, axis=0)  # (4,)
+
+        stokes_labels = ["I", "Q", "U", "V"]
+        print("\n--- Fast Synthesis RMS (normalized units) ---")
+        for i, label in enumerate(stokes_labels):
+            print(f"  Stokes {label}: {rms_per_component[i]:.5f}")
+
+        # Assemble ball results (or None if not requested)
+        ball_decoded = np.concatenate(ball_decoded_list, axis=0) if n_ball > 0 else None
+
+        return {
+            'synthesized_stokes': synthesized_stokes,
+            'residuals': residuals,
+            'rms_per_profile': rms_per_profile,
+            'rms_per_component': rms_per_component,
+            'ball_decoded': ball_decoded,
+        }
+
+
+    def plot_fast_synthesis_results(self, stokes_all, synthesis_results, n_samples=3):
+        """
+        Produces analysis plots for the fast Stokes synthesis (step 4b).
+
+        Generates three figure types:
+        1) Profile comparisons: ground-truth vs synthesized Stokes for n_samples random profiles.
+            If ball data is available, also overlays the ball ensemble to show local z uncertainty.
+        2) Residual distributions: histogram of residuals for each Stokes component.
+        3) RMS summary bar chart: mean RMS per Stokes component across the test set.
+
+        Args:
+            stokes_all        : np.ndarray (N, 4, 112) — ground-truth normalized Stokes profiles
+            synthesis_results : dict returned by fast_stokes_synthesis()
+            n_samples         : int — number of random profiles to plot in the comparison figure
+        """
+
+        synthesized_stokes = synthesis_results['synthesized_stokes']
+        residuals          = synthesis_results['residuals']
+        rms_per_profile    = synthesis_results['rms_per_profile']
+        rms_per_component  = synthesis_results['rms_per_component']
+        ball_decoded       = synthesis_results['ball_decoded']   # (N, n_ball, 4, 112) or None
+
+        stokes_labels = ["I", "Q", "U", "V"]
+        N = stokes_all.shape[0]
+
+        # Use or create the output directory (consistent with plot_reconstruction)
+        if not hasattr(self, 'output_dir'):
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            self.output_dir = os.path.join(os.path.dirname(__file__), f"weight_trial_{timestamp}")
+            os.makedirs(self.output_dir, exist_ok=True)
+            print(f"Saving synthesis plots to folder: {self.output_dir}")
+
+        # ------------------------------------------------------------------
+        # Figure 1: Profile comparisons (ground truth vs synthesized)
+        # One figure per random sample, 4 subplots (one per Stokes component)
+        # ------------------------------------------------------------------
+        indices = random.sample(range(N), min(n_samples, N))
+
+        for idx in indices:
+            fig, axes = pl.subplots(2, 2, figsize=(12, 8))
+            fig.suptitle(f"Fast Stokes Synthesis — Sample {idx} (4b: model → z → decoder_stokes)")
+            axes = axes.flatten()
+
+            for s, label in enumerate(stokes_labels):
+                ax = axes[s]
+
+                # If ball data is available, draw it first as a light shaded ensemble
+                # so the true and predicted lines sit on top
+                if ball_decoded is not None:
+                    # ball_decoded[idx] shape: (n_ball, 4, 112)
+                    for b in range(ball_decoded.shape[1]):
+                        ax.plot(ball_decoded[idx, b, s], color='lightblue', alpha=0.3, linewidth=0.5)
+                    # Add a single proxy line for the legend (avoids n_ball legend entries)
+                    ax.plot([], [], color='lightblue', alpha=0.6, linewidth=1.0, label='Ball samples')
+
+                ax.plot(stokes_all[idx, s],         color='black',  linewidth=1.5, label='Ground truth')
+                ax.plot(synthesized_stokes[idx, s], color='red',    linewidth=1.5, linestyle='--', label='Synthesized')
+
+                ax.set_title(f"Stokes {label}  (RMS={rms_per_profile[idx, s]:.4f})")
+                ax.set_xlabel("Wavelength index")
+                ax.set_ylabel("Normalized value")
+                ax.legend(fontsize=8)
+
+            pl.tight_layout(rect=[0, 0, 1, 0.95])
+            out = os.path.join(self.output_dir, f"synthesis_profiles_{idx}.pdf")
+            pl.savefig(out, dpi=150)
+            print(f"Saved {out}")
+            pl.close()
+
+        # ------------------------------------------------------------------
+        # Figure 2: Residual distributions (one subplot per Stokes component)
+        # Histograms let you see whether errors are centred at zero, 
+        # and whether there are outlier profiles with large residuals
+        # ------------------------------------------------------------------
+        fig, axes = pl.subplots(1, 4, figsize=(16, 4))
+        fig.suptitle("Residual distributions (synthesized − ground truth)")
+
+        for s, label in enumerate(stokes_labels):
+            ax = axes[s]
+            # Flatten over all samples and wavelengths for a global residual histogram
+            res_flat = residuals[:, s, :].flatten()
+            ax.hist(res_flat, bins=80, color='steelblue', edgecolor='none', density=True)
+            ax.axvline(0, color='black', linestyle='--', linewidth=1.0)
+            ax.set_title(f"Stokes {label}")
+            ax.set_xlabel("Residual")
+            ax.set_ylabel("Density")
+
+            # Annotate with mean and std of residuals for quick inspection
+            ax.text(0.97, 0.95,
+                    f"μ={res_flat.mean():.4f}\nσ={res_flat.std():.4f}",
+                    transform=ax.transAxes, ha='right', va='top', fontsize=8,
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+
+        pl.tight_layout()
+        out = os.path.join(self.output_dir, "synthesis_residuals.pdf")
+        pl.savefig(out, dpi=150)
+        print(f"Saved {out}")
+        pl.close()
+
+        # ------------------------------------------------------------------
+        # Figure 3: RMS summary bar chart
+        # One bar per Stokes component — easy to compare quality across I/Q/U/V
+        # ------------------------------------------------------------------
+        fig, ax = pl.subplots(figsize=(6, 4))
+        bars = ax.bar(stokes_labels, rms_per_component, color=['steelblue', 'coral', 'mediumseagreen', 'orchid'])
+
+        # Annotate each bar with its numeric value
+        for bar, val in zip(bars, rms_per_component):
+            ax.text(bar.get_x() + bar.get_width() / 2.0, bar.get_height() + 0.0002,
+                    f"{val:.5f}", ha='center', va='bottom', fontsize=9)
+
+        ax.set_title("Mean RMS per Stokes component\n(Fast synthesis: model → z → decoder_stokes)")
+        ax.set_xlabel("Stokes parameter")
+        ax.set_ylabel("Mean RMS (normalized units)")
+        pl.tight_layout()
+        out = os.path.join(self.output_dir, "synthesis_rms_summary.pdf")
+        pl.savefig(out, dpi=150)
+        print(f"Saved {out}")
+        pl.close()
+
+        # ------------------------------------------------------------------
+        # Figure 4 (optional): RMS distribution per component as box plots
+        # Shows the spread of per-profile RMS values, not just the mean —
+        # useful for spotting whether bad reconstructions are concentrated
+        # on a few outlier profiles or spread across the whole test set
+        # ------------------------------------------------------------------
+        fig, ax = pl.subplots(figsize=(7, 4))
+        ax.boxplot([rms_per_profile[:, s] for s in range(4)],
+                labels=stokes_labels,
+                patch_artist=True,
+                boxprops=dict(facecolor='lightsteelblue'),
+                medianprops=dict(color='black', linewidth=1.5))
+
+        ax.set_title("RMS distribution per profile\n(Fast synthesis: model → z → decoder_stokes)")
+        ax.set_xlabel("Stokes parameter")
+        ax.set_ylabel("RMS (normalized units)")
+        pl.tight_layout()
+        out = os.path.join(self.output_dir, "synthesis_rms_boxplot.pdf")
+        pl.savefig(out, dpi=150)
+        print(f"Saved {out}")
+        pl.close()
+
 if (__name__ == '__main__'):
 
     files = glob.glob('../train/weights/*.pth')
     files.sort()
     #checkpoint = files[-1]
-    checkpoint = '../train/weights/2025-11-24-10_44_18_clip.pth' 
+    checkpoint = '../train/weights/2025-11-24-10_44_18_clip.pth' # (w_clip=2, w_stokes=1, w_models=2)
 
     deepnet = Testing(checkpoint, gpu=0, batch_size=1024)
     z_stokes, z_models, models, stokes, decoded_models, decoded_stokes = deepnet.test()
 
-    deepnet.plot_reconstruction(stokes, decoded_stokes, models, decoded_models, n_samples=3)
+    #deepnet.plot_reconstruction(stokes, decoded_stokes, models, decoded_models, n_samples=3)
+
+    # APPROACH 1
+    #results = deepnet.fast_stokes_synthesis()
+    #deepnet.plot_fast_synthesis_results(results)
+
+    # APPROACH 2:
+    synthesis_results = deepnet.fast_stokes_synthesis(
+    models, stokes,
+    n_ball=00,    # set to 0 to skip the ball experiment
+    ball_sigma=0.02
+    )
+    deepnet.plot_fast_synthesis_results(stokes, synthesis_results, n_samples=3)
 
     #for param_idx in range(6):  # loop over T, vmic, v, Bx, By, Bz
     #    deepnet.plot_tsne_1(z_stokes, z_models, models, parameter_idx=param_idx, depth_idx=40)
 
-    deepnet.plot_tsne_joint(z_stokes, z_models, models, param="T", height_idx=40, use_pca=False)
-    deepnet.plot_tsne_joint(z_stokes, z_models, models, param="vmic", height_idx=40, use_pca=False)
-    deepnet.plot_tsne_joint(z_stokes, z_models, models, param="v", height_idx=40, use_pca=False)
-    deepnet.plot_tsne_joint(z_stokes, z_models, models, param="Bx", height_idx=40, use_pca=False)
-    deepnet.plot_tsne_joint(z_stokes, z_models, models, param="By", height_idx=40, use_pca=False)
-    deepnet.plot_tsne_joint(z_stokes, z_models, models, param="Bz", height_idx=40, use_pca=False)
+    # EL BUENO ES ESTE, LO QUITO PARA CORRER PRUEBAS:
+    #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="T", height_idx=40, use_pca=False)
+    #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="vmic", height_idx=40, use_pca=False)
+    #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="v", height_idx=40, use_pca=False)
+    #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="Bx", height_idx=40, use_pca=False)
+    #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="By", height_idx=40, use_pca=False)
+    #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="Bz", height_idx=40, use_pca=False)
+

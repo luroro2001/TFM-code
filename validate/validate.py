@@ -287,68 +287,6 @@ class Testing(object):
             pl.close()
         
 
-    def plot_tsne_2(self, z_stokes, z_models, models, param="Bz", height_idx=40, use_pca=True):
-        """
-        Projects both latent spaces (Stokes and Models) to 2D using t-SNE and plots them side 
-        by side in the same figure.
-
-        param: one of ["T", "vmic", "v", "Bx", "By", "Bz"]
-        height_idx: the index in depth (0–79)
-        """
-
-        print("Running t-SNE projection...")
-
-        # Select physical parameter
-        param_dict = {"T": 0, "vmic": 1, "v": 2, "Bx": 3, "By": 4, "Bz": 5}
-
-        p_index = param_dict[param]
-
-        # NOTA: models shape: (N, 6, 80)
-        values = models[:, p_index, height_idx] # colour by chosen physical param. at chosen depth
-
-        # PCA is recommended if the number of features is very high
-        # source: https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html
-        if use_pca:
-            if z_stokes.shape[1] > 50:
-                print("Applying PCA: 50 dims (Stokes)")
-                z_stokes = PCA(n_components=50).fit_transform(z_stokes)
-
-            if z_models.shape[1] > 50:
-                print("Applying PCA: 50 dims (Models)")
-                z_models = PCA(n_components=50).fit_transform(z_models)
-
-        # We compute t-SNE separately (?)
-        tsne = TSNE(n_components=2, perplexity=30, init="pca", learning_rate="auto", random_state=42)
-
-        print("Computing t-SNE for Stokes encoder...")
-        z_stokes_2d = tsne.fit_transform(z_stokes)
-
-        print("Computing t-SNE for Models encoder...")
-        z_models_2d = tsne.fit_transform(z_models)
-
-        # Plot them
-        fig, axes = pl.subplots(1, 2, figsize=(14, 6))
-        fig.suptitle(f"Latent Space t-SNE ({param}, depth={height_idx})")
-
-        # Stokes encoder
-        sc1 = axes[0].scatter(z_stokes_2d[:, 0], z_stokes_2d[:, 1], c=values, cmap="viridis", s=8)
-        axes[0].set_title("Stokes Encoder")
-        fig.colorbar(sc1, ax=axes[0], label=param)
-
-        # Models encoder 
-        sc2 = axes[1].scatter(z_models_2d[:, 0], z_models_2d[:, 1], c=values, cmap="viridis", s=8)
-        axes[1].set_title("Models Encoder")
-        fig.colorbar(sc2, ax=axes[1], label=param)
-
-        pl.tight_layout()
-
-        filename = os.path.join(self.output_dir, f"tsne_{param}_h{height_idx}.pdf")
-        pl.savefig(filename, dpi=150)
-        print(f"Saved {filename}")
-        pl.close()
-
-
-
     def plot_tsne_joint(self, z_stokes, z_models, models, param="Bz", height_idx=40, use_pca=True, perplexity=30):
         """
         Joint t-SNE projection of z_stokes and z_models.
@@ -406,65 +344,6 @@ class Testing(object):
         pl.savefig(filename, dpi=150)
         print(f"Saved {filename}")
         pl.close()
-
-    def plot_tsne(self, z_stokes, z_models, models, param="T", height_idx=40, use_pca=True, perplexity=30):
-        """
-        Combines the two previous functions to make just one plot.
-        """
-
-        param_dict = {"T": 0, "vmic": 1, "v": 2, "Bx": 3, "By": 4, "Bz": 5}
-        p_index = param_dict[param]
-        values = models[:, p_index, height_idx]
-
-        # PCA pre-reduction (as suggested in scikit-learn's page)
-        if use_pca:
-            if z_stokes.shape[1] > 50:
-                print("Applying PCA → 50 dims (Stokes)")
-                z_stokes = PCA(n_components=50).fit_transform(z_stokes)
-            if z_models.shape[1] > 50:
-                print("Applying PCA → 50 dims (Models)")
-                z_models = PCA(n_components=50).fit_transform(z_models)
-
-        tsne = TSNE(n_components=2, perplexity=perplexity, init="pca", learning_rate="auto", random_state=42)
-
-        print("Computing t-SNE for Stokes encoder...")
-        z_stokes_2d = tsne.fit_transform(z_stokes)
-        print("Computing t-SNE for Models encoder...")
-        z_models_2d = tsne.fit_transform(z_models)
-        print("Computing joint t-SNE...")
-        z_all = np.concatenate([z_stokes, z_models], axis=0)
-        z_all_2d = tsne.fit_transform(z_all)
-        N = len(z_stokes)
-        z_stokes_joint_2d = z_all_2d[:N]
-        z_models_joint_2d = z_all_2d[N:]
-
-        fig, axes = pl.subplots(1, 3, figsize=(21, 6))
-        #fig.suptitle(f"t-SNE latent space — {param} at depth {height_idx} | "
-        #            f"w_clip={self.weight_clip}, w_stokes={self.weight_stokes}, w_models={self.weight_models}")
-        fig.suptitle(f"t-SNE latent space ({param} at depth {height_idx}) — "
-                    f"w_clip=2, w_stokes=1, w_models=2")
-
-        # Separate plots
-        for ax, z_2d, title in zip(axes[:2], [z_stokes_2d, z_models_2d], ["Stokes encoder", "Models encoder"]):
-            sc = ax.scatter(z_2d[:, 0], z_2d[:, 1], c=values, marker='+', cmap="viridis", s=8, alpha=0.8, linewidths=0.5)
-            fig.colorbar(sc, ax=ax, label=param)
-            ax.set_title(title)
-
-        # Joint plot
-        sc = axes[2].scatter(z_stokes_joint_2d[:, 0], z_stokes_joint_2d[:, 1],
-                            c=values, cmap="magma", s=8, alpha=0.8, marker="o", facecolors="none", linewidths=0.5, label="Stokes")
-        axes[2].scatter(z_models_joint_2d[:, 0], z_models_joint_2d[:, 1],
-                        c=values, cmap="magma", s=8, alpha=0.8, marker="+", linewidths=0.5, label="Models")
-        fig.colorbar(sc, ax=axes[2], label=param)
-        axes[2].set_title("Joint")
-        axes[2].legend()
-
-        pl.tight_layout()
-        filename = os.path.join(self.output_dir, f"tsne_{param}_h{height_idx}.pdf")
-        pl.savefig(filename, dpi=150)
-        print(f"Saved {filename}")
-        pl.close()
-
 
 
     def fast_stokes_synthesis(self, models_all, stokes_all, n_ball=0, ball_sigma=0.02):

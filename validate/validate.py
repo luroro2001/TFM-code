@@ -23,7 +23,6 @@ import resnet
 import dataset
 import normalize
 import symlog
-import resnet
 import glob
 from einops import rearrange
 import random 
@@ -257,7 +256,6 @@ class Testing(object):
             ax.set_xlabel("Wavelength index")
             ax.set_ylabel("Normalized intensity")
             ax.legend(fontsize=8)
-            #ax.grid(alpha=0.3)
 
             # plot the model parameters
             ax = axes[1]
@@ -268,7 +266,6 @@ class Testing(object):
             ax.set_xlabel("Depth index")
             ax.set_ylabel("Value")
             ax.legend(fontsize=8, ncol=3)
-            #ax.grid(alpha=0.3)
 
             pl.tight_layout(rect=[0, 0, 1, 0.96])
             #pl.show()
@@ -278,92 +275,39 @@ class Testing(object):
             print(f"Saved {output_file}")
             pl.close()
         
-    def plot_tsne_1(self, z_stokes, z_models, models, parameter_idx=0, depth_idx=40):
-        """
-        Project latent vectors to 2D with t-SNE and color by a physical parameter.
-        parameter_idx: 0=T, 1=vmic, 2=v, 3=Bx, 4=By, 5=Bz
-        depth_idx: which depth layer to use for coloring
-        """
-        param_names = ["T", "vmic", "v", "Bx", "By", "Bz"]
-        
-        # Combine both latent spaces and reduce together
-        z_all = np.concatenate([z_stokes, z_models], axis=0)
-        z_2d = TSNE(n_components=2, perplexity=30, random_state=42).fit_transform(z_all)
-        
-        n = len(z_stokes)
-        z_stokes_2d = z_2d[:n]
-        z_models_2d = z_2d[n:]
-        
-        # Color by chosen physical parameter at chosen depth
-        color_values = models[:, parameter_idx, depth_idx]
-        
-        fig, axes = pl.subplots(1, 2, figsize=(14, 6))
-        fig.suptitle(f"t-SNE latent space, colored by {param_names[parameter_idx]} at depth {depth_idx}")
-        
-        for ax, z_2d_half, title in zip(axes, [z_stokes_2d, z_models_2d], ["Stokes encoder", "Models encoder"]):
-            sc = ax.scatter(z_2d_half[:, 0], z_2d_half[:, 1], c=color_values, cmap='RdBu_r', s=2, alpha=0.7)
-            pl.colorbar(sc, ax=ax, label=param_names[parameter_idx])
-            ax.set_title(title)
-            ax.set_xlabel("t-SNE 1")
-            ax.set_ylabel("t-SNE 2")
-        
-        pl.tight_layout()
-        output_file = os.path.join(self.output_dir, f"tsne_{param_names[parameter_idx]}.pdf")
-        pl.savefig(output_file, dpi=150)
-        print(f"Saved {output_file}")
-        pl.close()
 
-    def plot_tsne_2(self, z_stokes, z_models, models,
-                    param="Bz", height_idx=40, use_pca=True):
+    def plot_tsne_2(self, z_stokes, z_models, models, param="Bz", height_idx=40, use_pca=True):
         """
-        Projects both latent spaces (Stokes and Models) to 2D using t-SNE
-        and plots them side by side in the same figure.
+        Projects both latent spaces (Stokes and Models) to 2D using t-SNE and plots them side 
+        by side in the same figure.
 
         param: one of ["T", "vmic", "v", "Bx", "By", "Bz"]
-        height_idx: index in depth (0–79)
+        height_idx: the index in depth (0–79)
         """
 
         print("Running t-SNE projection...")
 
-        # ------------------------------------
-        # 1) Select physical parameter
-        # ------------------------------------
-        param_dict = {
-            "T": 0,
-            "vmic": 1,
-            "v": 2,
-            "Bx": 3,
-            "By": 4,
-            "Bz": 5,
-        }
+        # Select physical parameter
+        param_dict = {"T": 0, "vmic": 1, "v": 2, "Bx": 3, "By": 4, "Bz": 5}
 
         p_index = param_dict[param]
 
-        # models shape: (N, 6, 80)
-        values = models[:, p_index, height_idx]
+        # NOTA: models shape: (N, 6, 80)
+        values = models[:, p_index, height_idx] # colour by chosen physical param. at chosen depth
 
-        # ------------------------------------
-        # 2) Optional PCA
-        # ------------------------------------
+        # PCA is recommended if the number of features is very high
+        # source: https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html
         if use_pca:
             if z_stokes.shape[1] > 50:
-                print("Applying PCA → 50 dims (Stokes)")
+                print("Applying PCA: 50 dims (Stokes)")
                 z_stokes = PCA(n_components=50).fit_transform(z_stokes)
 
             if z_models.shape[1] > 50:
-                print("Applying PCA → 50 dims (Models)")
+                print("Applying PCA: 50 dims (Models)")
                 z_models = PCA(n_components=50).fit_transform(z_models)
 
-        # ------------------------------------
-        # 3) t-SNE separately (w_clip=0)
-        # ------------------------------------
-        tsne = TSNE(
-            n_components=2,
-            perplexity=30,
-            init="pca",
-            learning_rate="auto",
-            random_state=42,
-        )
+        # We compute t-SNE separately (?)
+        tsne = TSNE(n_components=2, perplexity=30, init="pca", learning_rate="auto", random_state=42)
 
         print("Computing t-SNE for Stokes encoder...")
         z_stokes_2d = tsne.fit_transform(z_stokes)
@@ -371,36 +315,18 @@ class Testing(object):
         print("Computing t-SNE for Models encoder...")
         z_models_2d = tsne.fit_transform(z_models)
 
-        # ------------------------------------
-        # 4) Plot side by side
-        # ------------------------------------
+        # Plot them
         fig, axes = pl.subplots(1, 2, figsize=(14, 6))
         fig.suptitle(f"Latent Space t-SNE ({param}, depth={height_idx})")
 
-        # ---- Stokes encoder ----
-        sc1 = axes[0].scatter(
-            z_stokes_2d[:, 0],
-            z_stokes_2d[:, 1],
-            c=values,
-            cmap="viridis",
-            s=8,
-        )
+        # Stokes encoder
+        sc1 = axes[0].scatter(z_stokes_2d[:, 0], z_stokes_2d[:, 1], c=values, cmap="viridis", s=8)
         axes[0].set_title("Stokes Encoder")
-        axes[0].set_xlabel("t-SNE 1")
-        axes[0].set_ylabel("t-SNE 2")
         fig.colorbar(sc1, ax=axes[0], label=param)
 
-        # ---- Models encoder ----
-        sc2 = axes[1].scatter(
-            z_models_2d[:, 0],
-            z_models_2d[:, 1],
-            c=values,
-            cmap="viridis",
-            s=8,
-        )
+        # Models encoder 
+        sc2 = axes[1].scatter(z_models_2d[:, 0], z_models_2d[:, 1], c=values, cmap="viridis", s=8)
         axes[1].set_title("Models Encoder")
-        axes[1].set_xlabel("t-SNE 1")
-        axes[1].set_ylabel("t-SNE 2")
         fig.colorbar(sc2, ax=axes[1], label=param)
 
         pl.tight_layout()
@@ -412,117 +338,68 @@ class Testing(object):
 
 
 
-    def plot_tsne_joint(self,
-                        z_stokes,
-                        z_models,
-                        models,
-                        param="Bz",
-                        height_idx=40,
-                        use_pca=True,
-                        perplexity=30):
+    def plot_tsne_joint(self, z_stokes, z_models, models, param="Bz", height_idx=40, use_pca=True, perplexity=30):
         """
         Joint t-SNE projection of z_stokes and z_models.
-
-        Both latent spaces are embedded into the SAME 2D space.
-        Useful for evaluating contrastive alignment.
-
+        Both latent spaces are embedded into the same 2D space
         param: one of ["T", "vmic", "v", "Bx", "By", "Bz"]
         height_idx: atmospheric depth index (0–79)
         """
 
-        print("Running JOINT t-SNE projection...")
+        print("Running joint t-SNE projection...")
 
-        # ------------------------------------
-        # 1) Select physical parameter
-        # ------------------------------------
-        param_dict = {
-            "T": 0,
-            "vmic": 1,
-            "v": 2,
-            "Bx": 3,
-            "By": 4,
-            "Bz": 5,
-        }
+        # select physical parameter
+        param_dict = {"T": 0, "vmic": 1, "v": 2, "Bx": 3, "By": 4, "Bz": 5}
 
         p_index = param_dict[param]
-        values = models[:, p_index, height_idx]
+        # (extract the value of the physical parameter at a specific height)
+        values = models[:, p_index, height_idx] # used to colour by chosen physical param. at chosen depth in plot
 
-        # ------------------------------------
-        # 2) Concatenate latent spaces
-        # ------------------------------------
-        z_all = np.concatenate([z_stokes, z_models], axis=0)
+        # concatenate the latent spaces
+        z_all = np.concatenate([z_stokes, z_models], axis=0) #shape is z_all : (2N, latent_dim)
+        #print(z_all.shape) #(12186, 64)
 
-        # ------------------------------------
-        # 3) Optional PCA pre-reduction
-        # ------------------------------------
+        # pptional PCA pre-reduction
+        # source: https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html
         if use_pca and z_all.shape[1] > 50:
-            print("Applying PCA → 50 dims before t-SNE")
+            print("Applying PCA: reducing to 50 dims before t-SNE")
             z_all = PCA(n_components=50).fit_transform(z_all)
 
-        # ------------------------------------
-        # 4) Joint t-SNE
-        # ------------------------------------
-        tsne = TSNE(
-            n_components=2,
-            perplexity=perplexity,
-            init="pca",
-            learning_rate="auto",
-            random_state=42,
-        )
+        # compute joint t-SNE
+        tsne = TSNE(n_components=2, perplexity=perplexity, init="pca", learning_rate="auto", random_state=42)
 
         z_2d = tsne.fit_transform(z_all)
 
-        # Split back
+        # split back for plot
         N = len(z_stokes)
         z_stokes_2d = z_2d[:N]
         z_models_2d = z_2d[N:]
 
-        # ------------------------------------
-        # 5) Plot
-        # ------------------------------------
+        # Plot
         pl.figure(figsize=(8, 7))
 
         # Stokes encoder
-        sc1 = pl.scatter(
-            z_stokes_2d[:, 0],
-            z_stokes_2d[:, 1],
-            c=values,
-            cmap="viridis",
-            s=12,
-            marker="o",
-            alpha=0.8,
-            label="Stokes encoder"
-        )
+        sc1 = pl.scatter(z_stokes_2d[:, 0], z_stokes_2d[:, 1], c=values, cmap="viridis", s=10, marker="x", alpha=0.8, linewidths=0.5, label="Stokes encoder")
 
         # Models encoder
-        sc2 = pl.scatter(
-            z_models_2d[:, 0],
-            z_models_2d[:, 1],
-            c=values,
-            cmap="viridis",
-            s=12,
-            marker="x",
-            alpha=0.8,
-            label="Models encoder"
-        )
+        sc2 = pl.scatter(z_models_2d[:, 0], z_models_2d[:, 1], c=values, cmap="viridis", s=10, marker="+", alpha=0.8, linewidths=0.5, label="Models encoder")
 
         pl.colorbar(sc1, label=f"{param} at depth {height_idx}")
-        pl.xlabel("t-SNE 1")
-        pl.ylabel("t-SNE 2")
-        pl.title(f"Joint Latent Space (t-SNE)\nColored by {param}")
+        #pl.title(f"Joint latent space (t-SNE)\nColored by {param}")
+        pl.title(f"Joint latent space (t-SNE)")
         pl.legend()
         pl.tight_layout()
 
-        filename = os.path.join(
-            self.output_dir,
-            f"tsne_joint_{param}_h{height_idx}.pdf"
-        )
+        filename = os.path.join(self.output_dir, f"tsne_joint_{param}_h{height_idx}.pdf")
 
         pl.savefig(filename, dpi=150)
         print(f"Saved {filename}")
         pl.close()
 
     def plot_tsne(self, z_stokes, z_models, models, param="T", height_idx=40, use_pca=True, perplexity=30):
+        """
+        Combines the two previous functions to make just one plot.
+        """
 
         param_dict = {"T": 0, "vmic": 1, "v": 2, "Bx": 3, "By": 4, "Bz": 5}
         p_index = param_dict[param]
@@ -561,8 +438,6 @@ class Testing(object):
             sc = ax.scatter(z_2d[:, 0], z_2d[:, 1], c=values, marker='+', cmap="viridis", s=8, alpha=0.8, linewidths=0.5)
             fig.colorbar(sc, ax=ax, label=param)
             ax.set_title(title)
-            #ax.set_xlabel("t-SNE 1")
-            #ax.set_ylabel("t-SNE 2")
 
         # Joint plot
         sc = axes[2].scatter(z_stokes_joint_2d[:, 0], z_stokes_joint_2d[:, 1],
@@ -571,8 +446,6 @@ class Testing(object):
                         c=values, cmap="magma", s=8, alpha=0.8, marker="+", linewidths=0.5, label="Models")
         fig.colorbar(sc, ax=axes[2], label=param)
         axes[2].set_title("Joint")
-        #axes[2].set_xlabel("t-SNE 1")
-        #axes[2].set_ylabel("t-SNE 2")
         axes[2].legend()
 
         pl.tight_layout()
@@ -586,7 +459,7 @@ if (__name__ == '__main__'):
     files = glob.glob('../train/weights/*.pth')
     files.sort()
     #checkpoint = files[-1]
-    checkpoint = '../train/weights/2025-11-24-10_44_18_clip.pth'
+    checkpoint = '../train/weights/2025-11-24-10_44_18_clip.pth' 
 
     deepnet = Testing(checkpoint, gpu=0, batch_size=1024)
     z_stokes, z_models, models, stokes, decoded_models, decoded_stokes = deepnet.test()
@@ -596,9 +469,9 @@ if (__name__ == '__main__'):
     #for param_idx in range(6):  # loop over T, vmic, v, Bx, By, Bz
     #    deepnet.plot_tsne_1(z_stokes, z_models, models, parameter_idx=param_idx, depth_idx=40)
 
-    deepnet.plot_tsne(z_stokes, z_models, models, param="T", height_idx=40)
-    deepnet.plot_tsne(z_stokes, z_models, models, param="vmic", height_idx=40)
-    deepnet.plot_tsne(z_stokes, z_models, models, param="v", height_idx=40)
-    deepnet.plot_tsne(z_stokes, z_models, models, param="Bx", height_idx=40)
-    deepnet.plot_tsne(z_stokes, z_models, models, param="By", height_idx=40)
-    deepnet.plot_tsne(z_stokes, z_models, models, param="Bz", height_idx=40)
+    deepnet.plot_tsne_joint(z_stokes, z_models, models, param="T", height_idx=40, use_pca=False)
+    deepnet.plot_tsne_joint(z_stokes, z_models, models, param="vmic", height_idx=40, use_pca=False)
+    deepnet.plot_tsne_joint(z_stokes, z_models, models, param="v", height_idx=40, use_pca=False)
+    deepnet.plot_tsne_joint(z_stokes, z_models, models, param="Bx", height_idx=40, use_pca=False)
+    deepnet.plot_tsne_joint(z_stokes, z_models, models, param="By", height_idx=40, use_pca=False)
+    deepnet.plot_tsne_joint(z_stokes, z_models, models, param="Bz", height_idx=40, use_pca=False)

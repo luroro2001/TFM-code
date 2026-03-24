@@ -353,38 +353,29 @@ class Testing(object):
         """
         Fast Stokes synthesizer: Model -> encoder_models -> z -> decoder_stokes -> Stokes.
 
-        For each physical model in the test set, encodes it into the latent space
-        using encoder_models, then decodes back to Stokes profiles using decoder_stokes.
-        This cross-modal decode is only meaningful if the contrastive training has 
-        successfully aligned both encoders in the shared latent space.
-
         Args:
-            models_all : np.ndarray, shape (N, 6, 80)  — normalized model parameters
-            stokes_all : np.ndarray, shape (N, 4, 112) — normalized Stokes profiles (ground truth)
+            models_all : np.ndarray, shape (N, 6, 80) ; normalized model parameters
+            stokes_all : np.ndarray, shape (N, 4, 112) ; normalized Stokes profiles (ground truth)
 
         Returns:
             dict with:
-                'synthesized_stokes' : np.ndarray (N, 4, 112) — predicted Stokes profiles
-                'residuals'          : np.ndarray (N, 4, 112) — pointwise residuals (pred - true)
-                'rms_per_profile'    : np.ndarray (N, 4)      — RMS error per Stokes component per sample
-                'rms_per_component'  : np.ndarray (4,)        — mean RMS across all samples per component
+                'synthesized_stokes' : np.ndarray (N, 4, 112) ; predicted Stokes profiles
+                'residuals'          : np.ndarray (N, 4, 112) ; pointwise residuals (pred - true)
+                'rms_per_profile'    : np.ndarray (N, 4)      ; RMS error per Stokes component per sample
+                'rms_per_component'  : np.ndarray (4,)        ; mean RMS across all samples per component
         """
 
         if not self.decoders:
-            raise RuntimeError("fast_stokes_synthesis() requires decoders (use_decoders=True in config).")
+            raise RuntimeError("Remember to use_decoders=True in config for synthesis/inversion to work.")
 
-        print("Running fast Stokes synthesis: model -> z -> decoder_stokes ...")
+        print("Running fast Stokes synthesis: model -> encoder_models -> z -> decoder_stokes ...")
 
-        # Convert numpy arrays to tensors and build a DataLoader
-        # so we process in batches (consistent with how test() works)
+        # convert numpy arrays to tensors and build a DataLoader
+        # so we process in batches (same as how test() works)
         models_tensor = torch.tensor(models_all, dtype=torch.float32)
         stokes_tensor = torch.tensor(stokes_all, dtype=torch.float32)
 
-        loader = torch.utils.data.DataLoader(
-            torch.utils.data.TensorDataset(models_tensor, stokes_tensor),
-            batch_size=self.batch_size,
-            shuffle=False
-        )
+        loader = torch.utils.data.DataLoader(torch.utils.data.TensorDataset(models_tensor, stokes_tensor), batch_size=self.batch_size, shuffle=False)
 
         synthesized_list = []
 
@@ -393,29 +384,29 @@ class Testing(object):
 
                 models_batch = models_batch.to(self.device)
 
-                # Flatten: (B, 6, 80) -> (B, 480) — mirrors the rearrange in train/test
+                # flatten: (B, 6, 80) -> (B, 480) 
                 models_flat = rearrange(models_batch, 'b c h -> b (c h)')
 
-                # Encode physical models into the shared latent space
+                # encode physical models into the shared latent space
                 z = self.encoder_models(models_flat)
-                z = F.normalize(z, dim=-1)  # unit-norm, consistent with training
+                z = F.normalize(z, dim=-1)  # unit norm
 
-                # Cross-modal decode: encoded from models, decoded as Stokes
+                # then decode as Stokes
                 synth_flat = self.decoder_stokes(z)
 
-                # Reshape back to (B, 4, 112)
+                # reshape back to (B, 4, 112)
                 synth = rearrange(synth_flat, 'b (c h) -> b c h', c=4)
                 synthesized_list.append(synth.cpu().numpy())
 
         synthesized_stokes = np.concatenate(synthesized_list, axis=0)  # (N, 4, 112)
 
-        # Residuals: pointwise difference between synthesized and ground-truth Stokes
+        # residuals: difference between synthesized and ground-truth Stokes
         residuals = synthesized_stokes - stokes_all  # (N, 4, 112)
 
         # RMS per sample per Stokes component: sqrt(mean over wavelength axis)
         rms_per_profile = np.sqrt(np.mean(residuals**2, axis=2))  # (N, 4)
 
-        # Mean RMS over the entire test set for each Stokes component
+        # mean RMS over the entire test set for each Stokes component
         rms_per_component = np.mean(rms_per_profile, axis=0)  # (4,)
 
         stokes_labels = ["I", "Q", "U", "V"]
@@ -439,12 +430,11 @@ class Testing(object):
         1) Profile comparisons: ground-truth vs synthesized Stokes for n_samples random profiles.
         2) Residual distributions: histogram of residuals for each Stokes component.
         3) RMS summary bar chart: mean RMS per Stokes component across the test set.
-        4) RMS box plots: distribution of per-profile RMS values per Stokes component.
 
         Args:
-            stokes_all        : np.ndarray (N, 4, 112) — ground-truth normalized Stokes profiles
+            stokes_all        : np.ndarray (N, 4, 112) ; ground-truth normalized Stokes profiles
             synthesis_results : dict returned by fast_stokes_synthesis()
-            n_samples         : int — number of random profiles to plot in the comparison figure
+            n_samples         : int ; number of random profiles to plot in the comparison figure
         """
 
         synthesized_stokes = synthesis_results['synthesized_stokes']
@@ -455,7 +445,7 @@ class Testing(object):
         stokes_labels = ["I", "Q", "U", "V"]
         N = stokes_all.shape[0]
 
-        # Use or create the output directory (consistent with plot_reconstruction)
+        # use or create the output directory 
         if not hasattr(self, 'output_dir'):
             timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
             self.output_dir = os.path.join(os.path.dirname(__file__), f"{timestamp}")
@@ -537,26 +527,6 @@ class Testing(object):
         print(f"Saved {out}")
         pl.close()
 
-        # ------------------------------------------------------------------
-        # Figure 4: RMS box plots per Stokes component
-        # Shows spread of per-profile RMS — useful for spotting whether failures
-        # are isolated outliers or spread systematically across the test set
-        # ------------------------------------------------------------------
-        fig, ax = pl.subplots(figsize=(7, 4))
-        ax.boxplot([rms_per_profile[:, s] for s in range(4)],
-                labels=stokes_labels,
-                patch_artist=True,
-                boxprops=dict(facecolor='lightsteelblue'),
-                medianprops=dict(color='black', linewidth=1.5))
-
-        ax.set_title("RMS distribution per profile\n(Fast synthesis: model → z → decoder_stokes)")
-        ax.set_xlabel("Stokes parameter")
-        ax.set_ylabel("RMS (normalized units)")
-        pl.tight_layout()
-        out = os.path.join(self.output_dir, "synthesis_rms_boxplot.pdf")
-        pl.savefig(out, dpi=150)
-        print(f"Saved {out}")
-        pl.close()
 
     def fast_stokes_inversion(self, stokes_all, models_all):
         """
@@ -579,7 +549,7 @@ class Testing(object):
         """
 
         if not self.decoders:
-            raise RuntimeError("fast_stokes_inversion() requires decoders (use_decoders=True in config).")
+            raise RuntimeError("Remember to use_decoders=True in config for synthesis/inversion to work.")
 
         print("Running fast Stokes inversion: Stokes -> encoder_stokes -> z -> decoder_models ...")
 
@@ -752,29 +722,6 @@ class Testing(object):
         print(f"Saved {out}")
         pl.close()
 
-        # ------------------------------------------------------------------
-        # Figure 4: Cumulative RMS distribution (CDF)
-        # Allows reading off percentile statements per parameter, e.g.
-        # "90% of profiles have temperature RMS below X" — more interpretable
-        # than a box plot for assessing practical inversion quality
-        # ------------------------------------------------------------------
-        fig, ax = pl.subplots(figsize=(8, 5))
-
-        for m, (label, color) in enumerate(zip(model_labels, colors)):
-            sorted_rms = np.sort(rms_per_profile[:, m])
-            cdf = np.arange(1, len(sorted_rms) + 1) / len(sorted_rms)
-            ax.plot(sorted_rms, cdf, color=color, linewidth=1.5, label=label)
-
-        ax.set_title("Cumulative RMS distribution\n(Fast inversion: Stokes → z → decoder_models)")
-        ax.set_xlabel("RMS (normalized units)")
-        ax.set_ylabel("Fraction of profiles")
-        ax.legend(fontsize=9)
-        ax.grid(True, alpha=0.3)
-        pl.tight_layout()
-        out = os.path.join(self.output_dir, "inversion_rms_cdf.pdf")
-        pl.savefig(out, dpi=150)
-        print(f"Saved {out}")
-        pl.close()
 
 if (__name__ == '__main__'):
 

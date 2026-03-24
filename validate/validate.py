@@ -184,7 +184,7 @@ class Testing(object):
                 models = models.to(self.device) # shape (batch size, 6, 80)
                 stokes = stokes.to(self.device) # shape (batch size, 4, 112) 
 
-                # L: use the einops.rearrange function to flatten the spatial/spectral 
+                # L: einops.rearrange function is used to flatten the spatial/spectral 
                 # dimensions of the input tensors into a single dimension, preparing them for 
                 # input to the neural network encoders.
                 # 'b c h -> b (c h)' keeps the batch dim. unchanged and flattens the last 
@@ -192,7 +192,7 @@ class Testing(object):
 
                 # This flattening is required because the ResNet encoders are defined with
                 # specific input dimensions: they expect 1D feature vectors, not 2D spatial/spectral data.
-                # The flattening converts each sample from a 2D profile (channels × spatial points) 
+                # The flattening converts each sample from a 2D profile (channels x spatial points) 
                 # into a single long vector that the neural network can process.
 
                 stokes_flat = rearrange(stokes, 'b c h -> b (c h)')
@@ -228,7 +228,7 @@ class Testing(object):
         decoded_models_all = np.concatenate(decoded_models_all, axis=0) if self.decoders else None
         decoded_stokes_all = np.concatenate(decoded_stokes_all, axis=0) if self.decoders else None
 
-        # THIS CAUSES THE MODEL PARAMS TO BE IN PHYSICAL UNITS IN THE PLOT
+        # (THIS DENORMALIZATION CAUSES THE MODEL PARAMS TO BE IN PHYSICAL UNITS IN THE PLOT)
         #models_all = self.denormalize(models_all)
         #decoded_models_all = self.denormalize(decoded_models_all) if self.decoders else None
 
@@ -238,9 +238,10 @@ class Testing(object):
         """
         Plot the original (before latent space) vs decoded Stokes and model parameters
         for a few random samples to check how well reconstruction works.
+        PENDING: IMPROVE THIS DESCRIPTION AS I DID WITH THE OTHERS.
         """
 
-        n_total = stokes.shape[0] # number of available samples in dataset
+        n_total = stokes.shape[0] # number of available samples in the dataset
         # randomly choose which ones to visualize (without exceeding total)
         indices = random.sample(range(n_total), min(n_samples, n_total))
 
@@ -249,7 +250,7 @@ class Testing(object):
 
         # create the directory to save the figures, with date in the name
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        self.output_dir = os.path.join(os.path.dirname(__file__), f"weight_trial_{timestamp}")
+        self.output_dir = os.path.join(os.path.dirname(__file__), f"{timestamp}")
         os.makedirs(self.output_dir, exist_ok=True)
         print(f"Saving validation plots to folder: {self.output_dir}")
 
@@ -290,9 +291,10 @@ class Testing(object):
     def plot_tsne_joint(self, z_stokes, z_models, models, param="Bz", height_idx=40, use_pca=True, perplexity=30):
         """
         Joint t-SNE projection of z_stokes and z_models.
-        Both latent spaces are embedded into the same 2D space
+        Both latent spaces are embedded into the same 2D space.
         param: one of ["T", "vmic", "v", "Bx", "By", "Bz"]
-        height_idx: atmospheric depth index (0–79)
+        height_idx: atmospheric depth index (0-79)
+        PENDING: IMPROVE THIS DESCRIPTION AS I DID WITH THE OTHERS.
         """
 
         print("Running joint t-SNE projection...")
@@ -308,8 +310,9 @@ class Testing(object):
         z_all = np.concatenate([z_stokes, z_models], axis=0) #shape is z_all : (2N, latent_dim)
         #print(z_all.shape) #(12186, 64)
 
-        # pptional PCA pre-reduction
+        # pptional PCA pre-reduction (which is suggested in the documentation)
         # source: https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html
+        # NOTA: I disabled it because it didn't really make a difference
         if use_pca and z_all.shape[1] > 50:
             print("Applying PCA: reducing to 50 dims before t-SNE")
             z_all = PCA(n_components=50).fit_transform(z_all)
@@ -324,13 +327,13 @@ class Testing(object):
         z_stokes_2d = z_2d[:N]
         z_models_2d = z_2d[N:]
 
-        # Plot
+        # plot
         pl.figure(figsize=(8, 7))
 
         # Stokes encoder
         sc1 = pl.scatter(z_stokes_2d[:, 0], z_stokes_2d[:, 1], c=values, cmap="viridis", s=10, marker="x", alpha=0.8, linewidths=0.5, label="Stokes encoder")
 
-        # Models encoder
+        # models encoder
         sc2 = pl.scatter(z_models_2d[:, 0], z_models_2d[:, 1], c=values, cmap="viridis", s=10, marker="+", alpha=0.8, linewidths=0.5, label="Models encoder")
 
         pl.colorbar(sc1, label=f"{param} at depth {height_idx}")
@@ -348,7 +351,7 @@ class Testing(object):
 
     def fast_stokes_synthesis(self, models_all, stokes_all):
         """
-        Fast Stokes synthesizer: Model -> z -> decoder_stokes -> Stokes.
+        Fast Stokes synthesizer: Model -> encoder_models -> z -> decoder_stokes -> Stokes.
 
         For each physical model in the test set, encodes it into the latent space
         using encoder_models, then decodes back to Stokes profiles using decoder_stokes.
@@ -455,7 +458,7 @@ class Testing(object):
         # Use or create the output directory (consistent with plot_reconstruction)
         if not hasattr(self, 'output_dir'):
             timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-            self.output_dir = os.path.join(os.path.dirname(__file__), f"weight_trial_{timestamp}")
+            self.output_dir = os.path.join(os.path.dirname(__file__), f"{timestamp}")
             os.makedirs(self.output_dir, exist_ok=True)
             print(f"Saving synthesis plots to folder: {self.output_dir}")
 
@@ -555,30 +558,247 @@ class Testing(object):
         print(f"Saved {out}")
         pl.close()
 
+    def fast_stokes_inversion(self, stokes_all, models_all):
+        """
+        Fast Stokes inverter: Stokes -> encoder_stokes -> z -> decoder_models -> model (step 4c).
+
+        For each Stokes profile in the test set, encodes it into the latent space
+        using encoder_stokes, then decodes back to physical model parameters using
+        decoder_models. 
+
+        Args:
+            stokes_all : np.ndarray, shape (N, 4, 112) — normalized Stokes profiles (input)
+            models_all : np.ndarray, shape (N, 6, 80)  — normalized model parameters (ground truth)
+
+        Returns:
+            dict with:
+                'inverted_models'    : np.ndarray (N, 6, 80) — predicted physical model parameters
+                'residuals'          : np.ndarray (N, 6, 80) — pointwise residuals (pred - true)
+                'rms_per_profile'    : np.ndarray (N, 6)     — RMS error per model component per sample
+                'rms_per_component'  : np.ndarray (6,)       — mean RMS across all samples per component
+        """
+
+        if not self.decoders:
+            raise RuntimeError("fast_stokes_inversion() requires decoders (use_decoders=True in config).")
+
+        print("Running fast Stokes inversion: Stokes -> encoder_stokes -> z -> decoder_models ...")
+
+        # Convert numpy arrays to tensors and build a DataLoader
+        # so we process in batches (consistent with how test() works)
+        stokes_tensor = torch.tensor(stokes_all, dtype=torch.float32)
+        models_tensor = torch.tensor(models_all, dtype=torch.float32)
+
+        loader = torch.utils.data.DataLoader(
+            torch.utils.data.TensorDataset(stokes_tensor, models_tensor),
+            batch_size=self.batch_size,
+            shuffle=False
+        )
+
+        inverted_list = []
+
+        with torch.no_grad():
+            for stokes_batch, models_batch in tqdm(loader, desc="Inverting Stokes"):
+
+                stokes_batch = stokes_batch.to(self.device)
+
+                # Flatten: (B, 4, 112) -> (B, 448) — mirrors the rearrange in train/test
+                stokes_flat = rearrange(stokes_batch, 'b c h -> b (c h)')
+
+                # Encode Stokes profiles into the shared latent space
+                z = self.encoder_stokes(stokes_flat)
+                z = F.normalize(z, dim=-1)  # unit-norm, consistent with training
+
+                # Cross-modal decode: encoded from Stokes, decoded as physical model
+                inverted_flat = self.decoder_models(z)
+
+                # Reshape back to (B, 6, 80)
+                inverted = rearrange(inverted_flat, 'b (c h) -> b c h', c=6)
+                inverted_list.append(inverted.cpu().numpy())
+
+        inverted_models = np.concatenate(inverted_list, axis=0)  # (N, 6, 80)
+
+        # Residuals: pointwise difference between inverted and ground-truth model parameters
+        residuals = inverted_models - models_all  # (N, 6, 80)
+
+        # RMS per sample per model component: sqrt(mean over depth axis)
+        rms_per_profile = np.sqrt(np.mean(residuals**2, axis=2))  # (N, 6)
+
+        # Mean RMS over the entire test set for each model component
+        rms_per_component = np.mean(rms_per_profile, axis=0)  # (6,)
+
+        model_labels = ["T", "vmic", "v", "Bx", "By", "Bz"]
+        print("\n--- Fast Inversion RMS (normalized units) ---")
+        for i, label in enumerate(model_labels):
+            print(f"  {label}: {rms_per_component[i]:.5f}")
+
+        return {
+            'inverted_models': inverted_models,
+            'residuals': residuals,
+            'rms_per_profile': rms_per_profile,
+            'rms_per_component': rms_per_component,
+        }
+
+
+    def plot_fast_inversion_results(self, models_all, inversion_results, n_samples=3):
+        """
+        Produces analysis plots for the fast Stokes inversion (step 4c).
+
+        Generates four figure types:
+        1) Profile comparisons: ground-truth vs inverted model parameters for n_samples
+            random profiles, one figure per sample with 6 subplots (one per model component).
+        2) Residual distributions: histogram of residuals for each model component.
+        3) RMS summary bar chart: mean RMS per model component across the test set.
+        4) Cumulative RMS distribution (CDF): fraction of profiles below a given RMS threshold.
+
+        Args:
+            models_all        : np.ndarray (N, 6, 80) — ground-truth normalized model parameters
+            inversion_results : dict returned by fast_stokes_inversion()
+            n_samples         : int — number of random profiles to plot in the comparison figure
+        """
+
+        inverted_models   = inversion_results['inverted_models']
+        residuals         = inversion_results['residuals']
+        rms_per_profile   = inversion_results['rms_per_profile']
+        rms_per_component = inversion_results['rms_per_component']
+
+        model_labels = ["T", "vmic", "v", "Bx", "By", "Bz"]
+        N = models_all.shape[0]
+
+        # Use or create the output directory (consistent with the rest of the validate script)
+        if not hasattr(self, 'output_dir'):
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            self.output_dir = os.path.join(os.path.dirname(__file__), f"{timestamp}")
+            os.makedirs(self.output_dir, exist_ok=True)
+            print(f"Saving inversion plots to folder: {self.output_dir}")
+
+        # ------------------------------------------------------------------
+        # Figure 1: Profile comparisons (ground truth vs inverted)
+        # One figure per random sample, 6 subplots (one per model component).
+        # Shows whether the inversion captures the depth stratification of each
+        # physical parameter (temperature, velocity, magnetic field components)
+        # ------------------------------------------------------------------
+        indices = random.sample(range(N), min(n_samples, N))
+
+        for idx in indices:
+            fig, axes = pl.subplots(2, 3, figsize=(14, 8))
+            #fig.suptitle(f"Fast Stokes Inversion — Sample {idx} (Stokes → encoder_stokes → z → decoder_models)")
+            axes = axes.flatten()
+
+            for m, label in enumerate(model_labels):
+                ax = axes[m]
+                ax.plot(models_all[idx, m],      color='black', linewidth=1.5, label='Ground truth')
+                ax.plot(inverted_models[idx, m], color='red',   linewidth=1.5, linestyle='--', label='Inverted')
+                ax.set_title(f"{label}  (RMS={rms_per_profile[idx, m]:.4f})")
+                ax.set_xlabel("Depth index")
+                ax.set_ylabel("Normalized value")
+                ax.legend(fontsize=8)
+
+            pl.tight_layout(rect=[0, 0, 1, 0.95])
+            out = os.path.join(self.output_dir, f"inversion_profiles_{idx}.pdf")
+            pl.savefig(out, dpi=150)
+            print(f"Saved {out}")
+            pl.close()
+
+        # ------------------------------------------------------------------
+        # Figure 2: Residual distributions (one subplot per model component)
+        # Histograms show whether errors are centred at zero (no bias) and
+        # how heavy the tails are (frequency of large errors per parameter)
+        # ------------------------------------------------------------------
+        fig, axes = pl.subplots(2, 3, figsize=(14, 8))
+        #fig.suptitle("Residual distributions (inverted − ground truth)")
+        axes = axes.flatten()
+
+        for m, label in enumerate(model_labels):
+            ax = axes[m]
+            res_flat = residuals[:, m, :].flatten()
+            ax.hist(res_flat, bins=80, color='steelblue', edgecolor='none', density=True)
+            ax.axvline(0, color='black', linestyle='--', linewidth=1.0)
+            ax.set_title(f"{label}")
+            ax.set_xlabel("Residual")
+            ax.set_ylabel("Density")
+
+            # Annotate with mean and std for quick inspection
+            ax.text(0.97, 0.95,
+                    f"μ={res_flat.mean():.4f}\nσ={res_flat.std():.4f}",
+                    transform=ax.transAxes, ha='right', va='top', fontsize=8,
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+
+        pl.tight_layout()
+        out = os.path.join(self.output_dir, "inversion_residuals.pdf")
+        pl.savefig(out, dpi=150)
+        print(f"Saved {out}")
+        pl.close()
+
+        # ------------------------------------------------------------------
+        # Figure 3: RMS summary bar chart
+        # One bar per model component — allows immediate comparison of which
+        # physical parameters are recovered well and which are more uncertain
+        # ------------------------------------------------------------------
+        colors = ['steelblue', 'coral', 'mediumseagreen', 'orchid', 'goldenrod', 'tomato']
+
+        fig, ax = pl.subplots(figsize=(8, 4))
+        bars = ax.bar(model_labels, rms_per_component, color=colors)
+
+        for bar, val in zip(bars, rms_per_component):
+            ax.text(bar.get_x() + bar.get_width() / 2.0, bar.get_height() + 0.0002,
+                    f"{val:.5f}", ha='center', va='bottom', fontsize=9)
+
+        #ax.set_title("Mean RMS per model component\n(Fast inversion: Stokes → z → decoder_models)")
+        ax.set_xlabel("Model parameter")
+        ax.set_ylabel("Mean RMS (normalized units)")
+        pl.tight_layout()
+        out = os.path.join(self.output_dir, "inversion_rms_summary.pdf")
+        pl.savefig(out, dpi=150)
+        print(f"Saved {out}")
+        pl.close()
+
+        # ------------------------------------------------------------------
+        # Figure 4: Cumulative RMS distribution (CDF)
+        # Allows reading off percentile statements per parameter, e.g.
+        # "90% of profiles have temperature RMS below X" — more interpretable
+        # than a box plot for assessing practical inversion quality
+        # ------------------------------------------------------------------
+        fig, ax = pl.subplots(figsize=(8, 5))
+
+        for m, (label, color) in enumerate(zip(model_labels, colors)):
+            sorted_rms = np.sort(rms_per_profile[:, m])
+            cdf = np.arange(1, len(sorted_rms) + 1) / len(sorted_rms)
+            ax.plot(sorted_rms, cdf, color=color, linewidth=1.5, label=label)
+
+        ax.set_title("Cumulative RMS distribution\n(Fast inversion: Stokes → z → decoder_models)")
+        ax.set_xlabel("RMS (normalized units)")
+        ax.set_ylabel("Fraction of profiles")
+        ax.legend(fontsize=9)
+        ax.grid(True, alpha=0.3)
+        pl.tight_layout()
+        out = os.path.join(self.output_dir, "inversion_rms_cdf.pdf")
+        pl.savefig(out, dpi=150)
+        print(f"Saved {out}")
+        pl.close()
+
 if (__name__ == '__main__'):
 
     files = glob.glob('../train/weights/*.pth')
     files.sort()
     #checkpoint = files[-1]
     checkpoint = '../train/weights/2025-11-24-10_44_18_clip.pth' # (w_clip=2, w_stokes=1, w_models=2)
+    #checkpoint = '../train/weights/2025-11-15-12_27_43_clip.pth' # (w_clip=2, w_stokes=1, w_models=1)
 
     deepnet = Testing(checkpoint, gpu=0, batch_size=1024)
     z_stokes, z_models, models, stokes, decoded_models, decoded_stokes = deepnet.test()
 
-    #deepnet.plot_reconstruction(stokes, decoded_stokes, models, decoded_models, n_samples=3)
+    # Autoencoder
+    deepnet.plot_reconstruction(stokes, decoded_stokes, models, decoded_models, n_samples=3)
 
-    # APPROACH 1
-    #results = deepnet.fast_stokes_synthesis()
-    #deepnet.plot_fast_synthesis_results(results)
-
-    # APPROACH 2:
+    # Fast Stokes synthesis
     synthesis_results = deepnet.fast_stokes_synthesis(models, stokes)    
     deepnet.plot_fast_synthesis_results(stokes, synthesis_results, n_samples=3)
 
-    #for param_idx in range(6):  # loop over T, vmic, v, Bx, By, Bz
-    #    deepnet.plot_tsne_1(z_stokes, z_models, models, parameter_idx=param_idx, depth_idx=40)
+    # Fast Stokes inversion
+    inversion_results = deepnet.fast_stokes_inversion(stokes, models)
+    deepnet.plot_fast_inversion_results(models, inversion_results, n_samples=3)
 
-    # EL BUENO ES ESTE, LO QUITO PARA CORRER PRUEBAS:
+    # t-SNE representation of latent space
     #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="T", height_idx=40, use_pca=False)
     #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="vmic", height_idx=40, use_pca=False)
     #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="v", height_idx=40, use_pca=False)

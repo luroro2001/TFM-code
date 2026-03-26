@@ -460,7 +460,7 @@ class Testing(object):
 
         for idx in indices:
             fig, axes = pl.subplots(2, 2, figsize=(12, 8))
-            #fig.suptitle(f"Fast Stokes Synthesis — Sample {idx} (model → z → decoder_stokes)")
+            #fig.suptitle(f"Fast Stokes Synthesis — Sample {idx}")
             axes = axes.flatten()
 
             for s, label in enumerate(stokes_labels):
@@ -508,7 +508,7 @@ class Testing(object):
 
         # ------------------------------------------------------------------
         # Figure 3: RMS summary bar chart
-        # One bar per Stokes component — easy headline metric to report
+        # One bar per Stokes component 
         # ------------------------------------------------------------------
         fig, ax = pl.subplots(figsize=(6, 4))
         bars = ax.bar(stokes_labels, rms_per_component,
@@ -518,7 +518,7 @@ class Testing(object):
             ax.text(bar.get_x() + bar.get_width() / 2.0, bar.get_height() + 0.0002,
                     f"{val:.5f}", ha='center', va='bottom', fontsize=9)
 
-        #ax.set_title("Mean RMS per Stokes component\n(Fast synthesis: model → z → decoder_stokes)")
+        #ax.set_title("Mean RMS per Stokes component\n(Fast synthesis)")
         ax.set_xlabel("Stokes parameter")
         ax.set_ylabel("Mean RMS (normalized units)")
         pl.tight_layout()
@@ -553,7 +553,7 @@ class Testing(object):
 
         print("Running fast Stokes inversion: Stokes -> encoder_stokes -> z -> decoder_models ...")
 
-        # Convert numpy arrays to tensors and build a DataLoader
+        # convert numpy arrays to tensors and build a DataLoader
         # so we process in batches (consistent with how test() works)
         stokes_tensor = torch.tensor(stokes_all, dtype=torch.float32)
         models_tensor = torch.tensor(models_all, dtype=torch.float32)
@@ -571,23 +571,23 @@ class Testing(object):
 
                 stokes_batch = stokes_batch.to(self.device)
 
-                # Flatten: (B, 4, 112) -> (B, 448) — mirrors the rearrange in train/test
+                # flatten: (B, 4, 112) -> (B, 448) 
                 stokes_flat = rearrange(stokes_batch, 'b c h -> b (c h)')
 
-                # Encode Stokes profiles into the shared latent space
+                # encode Stokes profiles into the shared latent space
                 z = self.encoder_stokes(stokes_flat)
-                z = F.normalize(z, dim=-1)  # unit-norm, consistent with training
+                z = F.normalize(z, dim=-1)  # unit-norm
 
-                # Cross-modal decode: encoded from Stokes, decoded as physical model
+                # then decoded as physical model
                 inverted_flat = self.decoder_models(z)
 
-                # Reshape back to (B, 6, 80)
+                # reshape back to (B, 6, 80)
                 inverted = rearrange(inverted_flat, 'b (c h) -> b c h', c=6)
                 inverted_list.append(inverted.cpu().numpy())
 
         inverted_models = np.concatenate(inverted_list, axis=0)  # (N, 6, 80)
 
-        # Residuals: pointwise difference between inverted and ground-truth model parameters
+        # residuals: difference between inverted and ground-truth model parameters
         residuals = inverted_models - models_all  # (N, 6, 80)
 
         # RMS per sample per model component: sqrt(mean over depth axis)
@@ -618,12 +618,11 @@ class Testing(object):
             random profiles, one figure per sample with 6 subplots (one per model component).
         2) Residual distributions: histogram of residuals for each model component.
         3) RMS summary bar chart: mean RMS per model component across the test set.
-        4) Cumulative RMS distribution (CDF): fraction of profiles below a given RMS threshold.
 
         Args:
-            models_all        : np.ndarray (N, 6, 80) — ground-truth normalized model parameters
+            models_all        : np.ndarray (N, 6, 80) ; ground-truth normalized model parameters
             inversion_results : dict returned by fast_stokes_inversion()
-            n_samples         : int — number of random profiles to plot in the comparison figure
+            n_samples         : int ; number of random profiles to plot in the comparison figure
         """
 
         inverted_models   = inversion_results['inverted_models']

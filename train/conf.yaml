@@ -1,35 +1,36 @@
-#training:
-#    noise: 3.0e-4 
-#    batch_size: 1024
-#    gpu: 0
-#    smooth: 0.05
-#    n_epochs: 1000
-#    lr: 3.0e-4
-#    warmup: 10
-#    weight_decay: 0.0
-#    use_decoders: True
-
-#mlp:
-#    n_hidden_mlp: 256
-#    num_layers_mlp: 5
-#    decoders: True
-#    latent_dim: 64
-#    dropout_probability: 0.1
-
 training:
-    noise: 3.0e-4
-    batch_size: 1024      # drastically lower for CPU
-    gpu: 0           # forces CPU usage
+    noise: 1.0e-3   # raised from 3e-4 to 1e-3 
+    batch_size: 1024
+    gpu: 0
     smooth: 0.05
-    n_epochs: 50        # short test run
+#    n_epochs: 1000
+    n_epochs: 150
     lr: 3.0e-4
-    warmup: 2           # proportionally reduced
+    warmup: 10
     weight_decay: 0.0
     use_decoders: True
 
 mlp:
-    n_hidden_mlp: 64    # smaller model
-    num_layers_mlp: 3   # fewer layers
+    n_hidden_mlp: 256
+    num_layers_mlp: 5
     decoders: True
-    latent_dim: 32      # smaller latent space
-    dropout_probability: 0.1 
+    latent_dim: 64
+    dropout_probability: 0.1
+
+#training:
+#    noise: 3.0e-4
+#    batch_size: 1024      # drastically lower for CPU
+#    gpu: 0           # forces CPU usage
+#    smooth: 0.05
+#    n_epochs: 50        # short test run
+#    lr: 3.0e-4
+#    warmup: 2           # proportionally reduced
+#    weight_decay: 0.0
+#    use_decoders: True
+
+#mlp:
+#    n_hidden_mlp: 64    # smaller model
+#    num_layers_mlp: 3   # fewer layers
+#    decoders: True
+#    latent_dim: 32      # smaller latent space
+#    dropout_probability: 0.1 

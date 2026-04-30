@@ -39,6 +39,7 @@ uses decoders and saves checkpoints.
 
 def merge_images(image_batch, size, labelsy=None, labelsx=None):
     # DUDA: when is this used? and for what purpose?  
+    # L: it's not used.
     b, h, w = image_batch.shape    
     img = np.zeros((int(h*size[0]), int(w*size[1])))
     for idx in range(b):

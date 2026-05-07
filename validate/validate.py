@@ -154,6 +154,12 @@ class Testing(object):
         self.model_upper = [25000., 3.0, 10.0, 1000.0, 1000.0, 1000.0]
         self.model_units = ["K", "km/s", "km/s", "G", "G", "G"]
 
+
+        # Denormalization bounds for Stokes parameters
+        self.stokes_lower = [0.8,  -1e-2, -1e-2, -5e-2]
+        self.stokes_upper = [1.2,   1e-2,  1e-2,  5e-2]
+        self.stokes_units = ["I/I$_c$", "Q/I$_c$", "U/I$_c$", "V/I$_c$"]
+
         # logtau axis: linearly spaced from 1.5 to -7.5, 80 points
         self.logtau = np.linspace(1.5, -7.5, 80)
 
@@ -308,62 +314,108 @@ class Testing(object):
             pl.close()
         
 
-    def plot_tsne_joint(self, z_stokes, z_models, models, param="T", height_idx=40, use_pca=True, perplexity=30):
+    def plot_tsne_joint(self, z_stokes, z_models, models, params=None, height_idx=40, use_pca=True, perplexity=30, depth_avg=False):
         """
         Joint t-SNE projection of z_stokes and z_models.
         Both latent spaces are embedded into the same 2D space.
+        one panel per physical parameter — all sharing the same 2D embedding geometry.
+        The t-SNE is computed once and reused across all panels; only the colormap changes.
         param: one of ["T", "vmic", "v", "Bx", "By", "Bz"]
         height_idx: atmospheric depth index (0-79)
         PENDING: IMPROVE THIS DESCRIPTION (a bit more) AS I DID WITH THE OTHERS.
         """
 
-        print("Running joint t-SNE projection...")
-
         # select a physical parameter
-        param_dict = {"T": 0, "vmic": 1, "v": 2, "Bx": 3, "By": 4, "Bz": 5}
+        param_dict  = {"T": 0, "vmic": 1, "v": 2, "Bx": 3, "By": 4, "Bz": 5}
+        param_units = {"T": "K", "vmic": "km/s", "v": "km/s", "Bx": "G", "By": "G", "Bz": "G"}
 
-        p_index = param_dict[param]
-        # (extract the value of the physical parameter at a specific height)
-        values = models[:, p_index, height_idx] # used to colour by chosen physical param. at chosen depth in plot
+        if params is None:
+            params = ["T", "vmic", "v", "Bx", "By", "Bz"]
 
-        # concatenate the latent spaces
-        z_all = np.concatenate([z_stokes, z_models], axis=0) #shape is z_all : (2N, latent_dim)
-        #print(z_all.shape) #(12186, 64)
+        # ------------------------------------------------------------------
+        # Step 1: compute the joint t-SNE embedding once
+        # Both latent spaces are concatenated so that Stokes and model encoder
+        # points are embedded into the same 2D geometry.
+        # ------------------------------------------------------------------
+        print("Computing joint t-SNE embedding (runs once for all parameters)...")
 
-        # pptional PCA pre-reduction (which is suggested in the documentation)
-        # source: https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html
-        # NOTA: I disabled it because it didn't really make a difference
+        z_all = np.concatenate([z_stokes, z_models], axis=0)  # (2N, latent_dim)
+
         if use_pca and z_all.shape[1] > 50:
-            print("Applying PCA: reducing to 50 dims before t-SNE")
+            print("Applying PCA: reducing to 50 dims before t-SNE...")
             z_all = PCA(n_components=50).fit_transform(z_all)
 
-        # compute joint t-SNE
-        tsne = TSNE(n_components=2, perplexity=perplexity, init="pca", learning_rate="auto", random_state=42)
+        tsne = TSNE(n_components=2, perplexity=perplexity, init="pca",
+                    learning_rate="auto", random_state=42)
+        z_2d = tsne.fit_transform(z_all)  # (2N, 2)
 
-        z_2d = tsne.fit_transform(z_all)
-
-        # split back for plot
         N = len(z_stokes)
-        z_stokes_2d = z_2d[:N]
-        z_models_2d = z_2d[N:]
+        z_stokes_2d = z_2d[:N]   # (N, 2)
+        z_models_2d = z_2d[N:]   # (N, 2)
 
-        # plot
-        pl.figure(figsize=(8, 7))
+        print("t-SNE done. Plotting...")
 
-        # Stokes encoder
-        sc1 = pl.scatter(z_stokes_2d[:, 0], z_stokes_2d[:, 1], c=values, cmap="viridis", s=10, marker="x", alpha=0.8, linewidths=0.5, label="Stokes encoder")
+        # ------------------------------------------------------------------
+        # Step 2: 2x3 grid — one panel per parameter, geometry fixed,
+        # only the colormap values change between panels.
+        # ------------------------------------------------------------------
+        n_params = len(params)
+        n_cols = 2
+        n_rows = 3  # 3x2 fills a portrait page cleanly
 
-        # models encoder
-        sc2 = pl.scatter(z_models_2d[:, 0], z_models_2d[:, 1], c=values, cmap="viridis", s=10, marker="+", alpha=0.8, linewidths=0.5, label="Models encoder")
+        fig, axes = pl.subplots(n_rows, n_cols, figsize=(12, 16))
+        axes = axes.flatten()
 
-        pl.colorbar(sc1, label=f"{param} at depth {height_idx}") # (both plots are colored by the same values, so obv. 'sc2' would be the same)
-        #pl.title(f"Joint latent space (t-SNE)\nColored by {param}")
-        pl.title(f"Latent space (t-SNE)")
-        pl.legend()
-        pl.tight_layout()
+        for i, param in enumerate(params):
+            ax = axes[i]
+            p_index = param_dict[param]
 
-        filename = os.path.join(self.output_dir, f"tsne_joint_{param}_h{height_idx}.pdf")
+            lo = self.model_lower[p_index]
+            hi = self.model_upper[p_index]
+            if depth_avg:
+                values = denormalize_output(models[:, p_index, :].mean(axis=1), lo, hi)
+                depth_label = "depth average"
+            else:
+                values = denormalize_output(models[:, p_index, height_idx], lo, hi)
+                depth_label = f"log τ={self.logtau[height_idx]:.1f}"
+            vmin, vmax = values.min(), values.max()
 
+            # plot models encoder first (underneath), Stokes encoder on top
+            ax.scatter(z_models_2d[:, 0], z_models_2d[:, 1],
+                    c=values, cmap="viridis", s=15, marker="+",
+                    alpha=0.5, linewidths=0.6,
+                    vmin=vmin, vmax=vmax,
+                    label="Models enc.")
+
+            sc = ax.scatter(z_stokes_2d[:, 0], z_stokes_2d[:, 1],
+                            c=values, cmap="viridis", s=15, marker="x",
+                            alpha=0.5, linewidths=0.6,
+                            vmin=vmin, vmax=vmax,
+                            label="Stokes enc.")
+
+            unit = param_units[param]
+            cbar = fig.colorbar(sc, ax=ax, fraction=0.046, pad=0.04)
+            #cbar.set_label(f"{param} [{unit}] at log τ={self.logtau[height_idx]:.1f}", fontsize=9)
+            cbar.set_label(f"{param} [{unit}] ({depth_label})", fontsize=9)
+
+            ax.set_title(param, fontsize=11, fontweight='bold')
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.legend(fontsize=8, markerscale=2.0, loc="upper right")
+
+        for j in range(n_params, len(axes)):
+            axes[j].set_visible(False)
+
+        #fig.suptitle(f"Joint latent space (t-SNE)  —  perplexity={perplexity}", fontsize=13)
+        pl.tight_layout(rect=[0, 0, 1, 0.97])
+
+        if not hasattr(self, 'output_dir'):
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            self.output_dir = os.path.join(os.path.dirname(__file__), f"{timestamp}")
+            os.makedirs(self.output_dir, exist_ok=True)
+
+        #filename = os.path.join(self.output_dir, f"tsne_all_h{height_idx}.pdf")
+        filename = os.path.join(self.output_dir, f"tsne_joint_all_{'davg' if depth_avg else f'h{height_idx}'}.pdf")
         pl.savefig(filename, dpi=150)
         print(f"Saved {filename}")
         pl.close()
@@ -505,6 +557,7 @@ class Testing(object):
         - stokes_all: np.ndarray (N, 4, 112) ; ground-truth normalized Stokes profiles
         - synthesis_results: dict returned by fast_stokes_synthesis()
         - n_samples: int ; number of random profiles to plot in the comparison figure
+        - indices: list of int or None ; if provided, plot these specific sample indices
         """
 
         synthesized_stokes = synthesis_results['synthesized_stokes']
@@ -546,28 +599,39 @@ class Testing(object):
 
             for s, label in enumerate(stokes_labels):
                 ax = axes[s]
+                lo, hi = self.stokes_lower[s], self.stokes_upper[s]
+
+                # denormalize ground truth and prediction to physical units
+                gt   = denormalize_output(stokes_all[idx, s], lo, hi)
+                pred = denormalize_output(synthesized_stokes[idx, s], lo, hi)
 
                 if has_ball:
                     # draw all individual ball samples as faint lines to show full spread
                     for b in range(n_ball):
-                        ax.plot(self.wavelength, ball_profiles[idx, b, s], color='lightblue', alpha=0.15, linewidth=0.4)
+                        bp = denormalize_output(ball_profiles[idx, b, s], lo, hi)
+                        ax.plot(self.wavelength, bp, color='lightblue', alpha=0.15, linewidth=0.4)
+
+                    # denormalize ball mean; rescale std from normalized to physical units
+                    bm = denormalize_output(ball_mean[idx, s], lo, hi)
+                    bs = ball_std[idx, s] * 0.5 * (hi - lo)
 
                     # Draw shaded ±1sigma band around the ball mean
                     ax.fill_between(
                         self.wavelength,
-                        ball_mean[idx, s] - ball_std[idx, s],
-                        ball_mean[idx, s] + ball_std[idx, s],
+                        bm - bs,
+                        bm + bs,
                         color='steelblue', alpha=0.35, label='Ball ±1σ'
                     )
 
                     # draw ball mean
-                    ax.plot(self.wavelength, ball_mean[idx, s], color='steelblue', linewidth=1.2, linestyle='--', label='Ball mean')
+                    ax.plot(self.wavelength, bm, color='steelblue', linewidth=1.2, linestyle='--', label='Ball mean')
 
                 # central prediction (from unperturbed z) and ground truth on top
-                ax.plot(self.wavelength,synthesized_stokes[idx, s], color='red',   linewidth=1.5, linestyle='--', label='Synthesized')
-                ax.plot(self.wavelength, stokes_all[idx, s], color='black', linewidth=1.5, label='Ground truth')
+                ax.plot(self.wavelength, pred, color='red',   linewidth=1.5, linestyle='--', label='Synthesized')
+                ax.plot(self.wavelength, gt, color='black', linewidth=1.5, label='Ground truth')
 
-                ax.set_title(f"Stokes {label}  (RMS={rms_per_profile[idx, s]:.4f})")
+                #ax.set_title(f"Stokes {label}  (RMS={rms_per_profile[idx, s]:.4f})")
+                ax.set_title(f"Stokes {label}")
                 ax.set_xlabel("Wavelength (Å)")
                 ax.set_ylabel(stokes_labels[s])
                 ax.legend(fontsize=8)
@@ -579,22 +643,26 @@ class Testing(object):
             pl.close()
 
         # ------------------------------------------------------------------
-        # Figure 2: Residual distributions (one subplot per Stokes component)
-        # Histograms show whether errors are centred at zero and reveal outliers
+        # Figure 2: Residual distributions in physical units
+        # (one subplot per Stokes component)
         # ------------------------------------------------------------------
         fig, axes = pl.subplots(1, 4, figsize=(16, 4))
-        #fig.suptitle("Residual distributions (synthesized − ground truth)")
 
         for s, label in enumerate(stokes_labels):
             ax = axes[s]
-            res_flat = residuals[:, s, :].flatten()
+            lo, hi = self.stokes_lower[s], self.stokes_upper[s]
+
+            # compute residuals in physical units
+            res_phys = (denormalize_output(synthesized_stokes[:, s, :], lo, hi)
+                    - denormalize_output(stokes_all[:, s, :],         lo, hi))
+            res_flat = res_phys.flatten()
+
             ax.hist(res_flat, bins=80, color='steelblue', edgecolor='none', density=True)
             ax.axvline(0, color='black', linestyle='--', linewidth=1.0)
             ax.set_title(f"Stokes {label}")
-            ax.set_xlabel("Residual")
+            ax.set_xlabel(f"Residual [{label}]")
             ax.set_ylabel("Density")
 
-            # Annotate with mean and std for quick inspection
             ax.text(0.97, 0.95,
                     f"μ={res_flat.mean():.4f}\nσ={res_flat.std():.4f}",
                     transform=ax.transAxes, ha='right', va='top', fontsize=8,
@@ -607,8 +675,7 @@ class Testing(object):
         pl.close()
 
         # ------------------------------------------------------------------
-        # Figure 3: RMS summary bar chart
-        # One bar per Stokes component 
+        # Figure 3: RMS summary bar chart (normalized units, consistent with inversion)
         # ------------------------------------------------------------------
         fig, ax = pl.subplots(figsize=(6, 4))
         bars = ax.bar(stokes_labels, rms_per_component,
@@ -618,7 +685,6 @@ class Testing(object):
             ax.text(bar.get_x() + bar.get_width() / 2.0, bar.get_height() + 0.0002,
                     f"{val:.5f}", ha='center', va='bottom', fontsize=9)
 
-        #ax.set_title("Mean RMS per Stokes component\n(Fast synthesis)")
         ax.set_xlabel("Stokes parameter")
         ax.set_ylabel("Mean RMS (normalized units)")
         pl.tight_layout()
@@ -921,33 +987,31 @@ print("Good profiles index length (test):", len(ind_test))
 
 if (__name__ == '__main__'):
 
-    files = glob.glob('../train/weights/*.pth')
+    files = glob.glob('../train/weights/*.pth')   
     files.sort()
     #checkpoint = files[-1]
-    checkpoint = '../train/weights/2026-03-26-20_21_50_clip.pth' # (w_clip=2, w_stokes=1, w_models=2), noise=1e-3
-    #checkpoint = '../train/weights/2025-11-15-12_27_43_clip.pth' # (w_clip=2, w_stokes=1, w_models=1)
+    #checkpoint = '../train/weights/2026-03-26-20_21_50_clip.pth' # (w_clip=2, w_stokes=1, w_models=2), noise=1e-3
+    checkpoint = '../train/weights/2026-05-05-11_54_48_clip.pth' # (w_clip=0, w_stokes=1, w_models=1), noise=1e-3
+    
 
     deepnet = Testing(checkpoint, gpu=0, batch_size=1024)
     z_stokes, z_models, models, stokes, decoded_models, decoded_stokes = deepnet.test()
 
     # Autoencoder
-    deepnet.plot_reconstruction(stokes, decoded_stokes, models, decoded_models, n_samples=3)
+    #deepnet.plot_reconstruction(stokes, decoded_stokes, models, decoded_models, n_samples=3)
 
     #fixed_indices = [716, 810, 1610, 4906, 892, 521, 3633]
     fixed_indices = [3858, 2634, 3693, 4421, 3636]
     # Fast Stokes synthesis
-    synthesis_results = deepnet.fast_stokes_synthesis(models, stokes, n_ball=100, ball_sigma=0.02)    
-    deepnet.plot_fast_synthesis_results(stokes, synthesis_results, n_samples=3, indices=fixed_indices)
+    #synthesis_results = deepnet.fast_stokes_synthesis(models, stokes, n_ball=100, ball_sigma=0.02)    
+    #deepnet.plot_fast_synthesis_results(stokes, synthesis_results, n_samples=3, indices=fixed_indices)
 
     # Fast Stokes inversion
-    inversion_results = deepnet.fast_stokes_inversion(stokes, models, n_ball=100, ball_sigma=0.02)
-    deepnet.plot_fast_inversion_results(models, inversion_results, n_samples=3, indices=fixed_indices)
+    #inversion_results = deepnet.fast_stokes_inversion(stokes, models, n_ball=100, ball_sigma=0.02)
+    #deepnet.plot_fast_inversion_results(models, inversion_results, n_samples=3, indices=fixed_indices)
 
     # t-SNE representation of latent space
-    #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="T", height_idx=40, use_pca=False)
-    #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="vmic", height_idx=40, use_pca=False)
-    #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="v", height_idx=40, use_pca=False)
-    #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="Bx", height_idx=40, use_pca=False)
-    #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="By", height_idx=40, use_pca=False)
-    #deepnet.plot_tsne_joint(z_stokes, z_models, models, param="Bz", height_idx=40, use_pca=False)
+    deepnet.plot_tsne_joint(z_stokes, z_models, models, height_idx=40, use_pca=False, depth_avg=False)
+
+
 

@@ -631,7 +631,7 @@ class Testing(object):
                 ax.plot(self.wavelength, gt, color='black', linewidth=1.5, label='Ground truth')
 
                 #ax.set_title(f"Stokes {label}  (RMS={rms_per_profile[idx, s]:.4f})")
-                ax.set_title(f"Stokes {label}")
+                #ax.set_title(f"Stokes {label}")
                 ax.set_xlabel("Wavelength (Å)")
                 ax.set_ylabel(stokes_labels[s])
                 ax.legend(fontsize=8)
@@ -657,9 +657,10 @@ class Testing(object):
                     - denormalize_output(stokes_all[:, s, :],         lo, hi))
             res_flat = res_phys.flatten()
 
-            ax.hist(res_flat, bins=80, color='steelblue', edgecolor='none', density=True)
+            ax.hist(res_flat, bins=80, color='rebeccapurple', edgecolor='none', density=True)
             ax.axvline(0, color='black', linestyle='--', linewidth=1.0)
-            ax.set_title(f"Stokes {label}")
+            #ax.set_title(f"Stokes {label}")
+            ax.set_title(f"{label}")
             ax.set_xlabel(f"Residual [{label}]")
             ax.set_ylabel("Density")
 
@@ -888,7 +889,8 @@ class Testing(object):
 
                 ax.set_xlabel("log τ")
                 ax.set_ylabel(f"{label} [{self.model_units[m]}]")
-                ax.set_title(f"{label}  (RMS={rms_per_profile[idx, m]:.4f})")
+                #ax.set_title(f"{label}  (RMS={rms_per_profile[idx, m]:.4f})")
+                #ax.set_title(f"{label}")
                 ax.invert_xaxis()
                 ax.legend(fontsize=8)
 
@@ -919,7 +921,7 @@ class Testing(object):
             )
             res_flat = res_phys.flatten()
 
-            ax.hist(res_flat, bins=80, color='steelblue', edgecolor='none', density=True)
+            ax.hist(res_flat, bins=80, color='rebeccapurple', edgecolor='none', density=True)
             ax.axvline(0, color='black', linestyle='--', linewidth=1.0)
             ax.set_title(f"{label}")
             ax.set_xlabel(f"Residual [{self.model_units[m]}]")
@@ -990,8 +992,8 @@ if (__name__ == '__main__'):
     files = glob.glob('../train/weights/*.pth')   
     files.sort()
     #checkpoint = files[-1]
-    #checkpoint = '../train/weights/2026-03-26-20_21_50_clip.pth' # (w_clip=2, w_stokes=1, w_models=2), noise=1e-3
-    checkpoint = '../train/weights/2026-05-05-11_54_48_clip.pth' # (w_clip=0, w_stokes=1, w_models=1), noise=1e-3
+    checkpoint = '../train/weights/2026-03-26-20_21_50_clip.pth' # (w_clip=2, w_stokes=1, w_models=2), noise=1e-3
+    #checkpoint = '../train/weights/2026-05-05-11_54_48_clip.pth' # (w_clip=0, w_stokes=1, w_models=1), noise=1e-3
     
 
     deepnet = Testing(checkpoint, gpu=0, batch_size=1024)
@@ -1000,8 +1002,26 @@ if (__name__ == '__main__'):
     # Autoencoder
     #deepnet.plot_reconstruction(stokes, decoded_stokes, models, decoded_models, n_samples=3)
 
-    #fixed_indices = [716, 810, 1610, 4906, 892, 521, 3633]
-    fixed_indices = [3858, 2634, 3693, 4421, 3636]
+    # using method defined in dataset.py (RMS as metric for S/N)
+    #fixed_indices = [5116, 4844, 3553, 5579, 2586, 5262, 3008, 3858, 810, 1610] # 10 samples with highest S/N, using RMS metric
+    #fixed_indices = [590, 962, 2605, 2634, 4906, 892, 3693, 4421, 3267, 2333] # 10 samples with mid S/N, using RMS metric
+    #fixed_indices = [521, 3633, 3636, 4923, 881, 427, 1332, 4492, 540, 3296] # 10 samples with low S/N, using RMS metric
+
+    # using noise_study method 
+    #fixed_indices = [2123, 3802, 1410, 2087, 5733, 1318, 2320, 3719, 1436, 1020]#[4362, 2728, 3774] # [4362, 2728, 3774] are representative samples (closest to the median S/N, when including I in its computation)
+    #fixed_indices = [4684, 1978, 4395, 2512, 2112, 607, 4894, 5423, 5548, 2556] # representative, (closest to median S/N=265.9), including I in computation
+    #fixed_indices = [445, 521, 2502, 427, 1225] #[4492, 521, 540] # these should be some of the lowest S/N samples, let's see if it's true. It seems true lol
+    #fixed_indices = [367, 5413, 898, 3889, 1104] #[719, 5413, 1157] # highest S/N samples (without seed, excliding I from the median calculation)
+    
+
+    # NEW VERSION: I fixed the seed in noise_study.py
+    # high S/N
+    #fixed_indices = [5413, 3426, 4347, 5637, 2719, 4993, 4976, 5996, 3959, 400]
+    # median S/N
+    #fixed_indices = [2298, 2622, 2600, 2734, 3420, 2232, 3252, 1539, 4333, 1192]
+    # low S/N
+    #fixed_indices = [521, 1053, 4895, 3636, 427, 3296, 5170, 987, 3633, 2380]
+    
     # Fast Stokes synthesis
     #synthesis_results = deepnet.fast_stokes_synthesis(models, stokes, n_ball=100, ball_sigma=0.02)    
     #deepnet.plot_fast_synthesis_results(stokes, synthesis_results, n_samples=3, indices=fixed_indices)
@@ -1011,7 +1031,8 @@ if (__name__ == '__main__'):
     #deepnet.plot_fast_inversion_results(models, inversion_results, n_samples=3, indices=fixed_indices)
 
     # t-SNE representation of latent space
+    deepnet.plot_tsne_joint(z_stokes, z_models, models, height_idx=20, use_pca=False, depth_avg=False)
     deepnet.plot_tsne_joint(z_stokes, z_models, models, height_idx=40, use_pca=False, depth_avg=False)
-
+    deepnet.plot_tsne_joint(z_stokes, z_models, models, height_idx=60, use_pca=False, depth_avg=False)
 
 

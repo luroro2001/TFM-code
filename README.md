@@ -1,6 +1,6 @@
 # Foundation Model for Solar Spectropolarimetry
 
-This master's thesis (TFM) presents the development and evaluation of a foundational model for solar spectropolarimetry employing contrastive training. The model consists of two residual network encoders, one for Stokes profiles and one for physical atmospheric models, trained together to project both modalities into a shared latent space using a CLIP style contrastive loss, as well as reconstruction losses from the two corresponding decoders. The training database consists of synthetic profiles of the Fe I doublet at 630.15 and 630.25 nm, computed from perturbations of semi-empirical solar atmospheric models, covering a wide range of physical conditions that are representative of different solar regions.
+This master's thesis (TFM) presents the development and evaluation of a foundation model for solar spectropolarimetry employing contrastive training. The model consists of two residual network encoders, one for Stokes profiles and one for physical atmospheric models, trained together to project both modalities into a shared latent space using a CLIP style contrastive loss, as well as reconstruction losses from the two corresponding decoders. The training database consists of synthetic profiles of the Fe I doublet at 630.15 and 630.25 nm, computed from perturbations of semi-empirical solar atmospheric models, covering a wide range of physical conditions that are representative of different solar regions.
 
 <img width="1541" height="893" alt="Image" src="https://github.com/user-attachments/assets/afd27cf2-10f9-42d6-99d6-df799ef9c85c" />
 
@@ -69,13 +69,13 @@ At each training step, both modalities are flattened, encoded, and L2-normalized
 ### 3. Validation (`validate/validate.py`)
 
 The `Testing` loads a saved checkpoint and runs the model on the test set. For each sample, Stokes profiles and physical models are independently encoded
-and normalized to obtain their latent representations. Different functions make it possible to: encode and decode (reconstruct) each type of data and compare the output to the ground truth; visualize a 2D projection of the latent space using t-SNE (to assess the sucess of the contrastive learning); perform fast Stokes synthesis and inversion (see following section).
+and normalized to obtain their latent representations. Different methods make it possible to: encode and decode (reconstruct) each type of data and compare the output to the ground truth; visualize a 2D projection of the latent space using t-SNE (to assess the sucess of the contrastive learning); perform fast Stokes synthesis and inversion (see following section).
 
 ---
 
 ## Downstream tasks
 
-The model currently allows the execution of two downstream applications:
+The model allows the execution of two downstream applications:
 
 ### Fast Stokes inversion
 

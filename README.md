@@ -15,6 +15,8 @@ This master's thesis (TFM) presents the development and evaluation of a foundati
 
 ## Project structure
 
+There are more files included in this repository, but below I only show the ones that are actually used in the model.
+
 ```
 TFM/code/
 │ 
@@ -31,35 +33,18 @@ TFM/code/
 │ 
 ├── modules 
 │   ├── dataset.py # to load the data
-│   ├── encoder_decoder.py # currently unused
-│   ├── encoding.py # currently unused
-│   ├── mlp.py # currently unused
 │   ├── normalize.py # normalization and denormalization fucntions
 │   ├── resnet.py # defines the residual networks
-│   ├── siren.py # currently unused
 │   └── symlog.py # symmetric logarithm transform
 │   
 ├── train 
 │   ├── weights/ # saved model checkpoints. NOT INCLUDED/UPDATED HERE
 │   ├── train_clip.py # CLIP style contrastive training
-│   ├── train_vicreg.py # VICReg style training. 
-│   └── conf.yaml # hyperparameters
+│   └── conf.yaml # hyperparameters file
 │ 
 ├── validate
-│   ├── validate.py #validation script
-│   └── validate_trial.py
-│ 
-├── validate_old # old scripts, UNUSED
-│   ├── deconvolution_hinode.py
-│   ├── doplots_clip.py
-│   ├── invert_clip.py
-│   ├── invert_vicreg.py
-│   ├── invert.py
-│   ├── noise_svd.py
-│   ├── validate_2d.py
-│   ├── validate.py
-│   ├── view_models.py
-│   └── view.py
+│   ├── validate.py # validation script
+│   └── validate_trial.py # only for testing, not part of the model
 │
 └── README.md
 ```
@@ -83,7 +68,7 @@ The fast Stokes inverter implements the cross-modal path that is illustrated in 
 
 ### Fast Stokes synthesis
 
-The fast Stokes synthesizer implements the cross-modal path that is illustrated in the figure below. Given a physical atmospheric model as input, the model encoder projects it into the shared latent space, producing a latent vector $\textbf{z}_m$ $\in$ $\mathbb{R}^{64}$, which is then decoded by the Stokes decoder to produce a synthetic Stokes profile. As with the inverter, this path was not part of the explicit training, so its performance reflects the quality of the contrastive alignment between the two encoders. The synthesizer represents the forward problem: given known physical conditions, producing the corresponding observational parameters.
+The fast Stokes synthesizer implements the cross-modal path that is illustrated in the figure below. Given a physical atmospheric model as input, the model encoder projects it into the shared latent space, producing a latent vector $\textbf{z}_m \in \mathbb{R}^{64}$, which is then decoded by the Stokes decoder to produce a synthetic Stokes profile. As with the inverter, this path was not part of the explicit training, so its performance reflects the quality of the contrastive alignment between the two encoders. The synthesizer represents the forward problem: given known physical conditions, producing the corresponding observational parameters.
 
 <img width="2716" height="788" alt="Image" src="https://github.com/user-attachments/assets/f39e6fec-7bd2-4b64-9e0c-eee9c984e5d9" />
 

@@ -13,6 +13,8 @@ This master's thesis (TFM) presents the development and evaluation of a foundati
 - [Downstream Tasks](#downstream-tasks)
 - [Requirements](#requirements)
 
+---
+
 ## Project structure
 
 There are more files included in this repository, but below I only show the ones that are actually used in the model.
@@ -52,7 +54,7 @@ TFM/code/
 
 ## How does it work?
 
-Thw inner workings of the model can be separated into three phases based on the main scripts: data loading and preprocessing, contrastive training and validation.
+The inner workings of the model can be separated into three phases based on the main scripts: data loading and preprocessing, contrastive training and validation.
 
 ### 1. Loading the data (`modules/dataset.py`)
 

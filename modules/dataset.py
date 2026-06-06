@@ -228,95 +228,6 @@ class DatasetHinode(torch.utils.data.Dataset):
     def __len__(self):
         return self.n_training
 
-def select_by_snr(dataset, n_per_category=2):
-    """
-    Selects sample indices with high, medium, and low S/N ratio based on
-    the RMS of the polarimetric signals (Q, U, V), which are the noise-sensitive ones.
-    
-    Parameters:
-    - dataset: a Dataset instance (already loaded)
-    - n_per_category: number of indices to return per S/N category
-    
-    Returns a dict with keys 'high', 'mid', 'low', each a list of indices.
-    """
-    N = dataset.stokes.shape[0]
-    snr_values = np.zeros(N)
-
-
-    for i in range(N):
-        # use raw stokes Q, U, V (index 1, 2, 3), not yet noise-added or normalized
-        # shape of dataset.stokes is (N, 1, 4, n_wavelengths)
-        Q = dataset.stokes[i, 0, 1, :]
-        U = dataset.stokes[i, 0, 2, :]
-        V = dataset.stokes[i, 0, 3, :]
-        # signal metric: max RMS across Q, U, V
-        snr_values[i] = max(np.sqrt(np.mean(Q**2)),
-                            np.sqrt(np.mean(U**2)),
-                            np.sqrt(np.mean(V**2)))
-
-    sorted_indices = np.argsort(snr_values)  # ascending: low signal first
-
-    high_indices = sorted_indices[-n_per_category:].tolist() #last two values
-    low_indices  = sorted_indices[:n_per_category].tolist() # first two values
-    # middle: take n_per_category indices centered around the median
-    mid_start = N // 2 - n_per_category // 2
-    mid_indices = sorted_indices[mid_start:mid_start + n_per_category].tolist()
-
-    print(f"S/N metric (max polarimetric RMS):")
-    print(f"  High S/N indices {high_indices}: values {snr_values[high_indices]}")
-    print(f"  Mid  S/N indices {mid_indices}:  values {snr_values[mid_indices]}")
-    print(f"  Low  S/N indices {low_indices}:  values {snr_values[low_indices]}")
-
-    return {'high': high_indices, 'mid': mid_indices, 'low': low_indices}
-
-
-def plot_noise_effect(dataset, indices, noise_level=1e-3):
-    """
-    For each index, plots original vs noisy Stokes profiles (I, Q, U, V)
-    in 4 panels, replicating exactly the noise addition done in __getitem__.
-    Uses pl.show() for interactive display.
-
-    Parameters:
-    - dataset: a Dataset instance
-    - indices: list of sample indices to plot
-    - noise_level: std of Gaussian noise to add (default 1e-3, matching conf.yaml)
-    """
-    stokes_labels = ["I", "Q", "U", "V"]
-
-    for idx in indices:
-        # extract raw profiles as is done in __getitem__
-        out_stokesI = dataset.stokes[idx, 0, 0, :].copy()
-        out_stokesQ = dataset.stokes[idx, 0, 1, :].copy()
-        out_stokesU = dataset.stokes[idx, 0, 2, :].copy()
-        out_stokesV = dataset.stokes[idx, 0, 3, :].copy()
-
-        # add noise exactly the samw way
-        noisy_I = out_stokesI + np.random.normal(0, noise_level, out_stokesI.shape)
-        noisy_Q = out_stokesQ + np.random.normal(0, noise_level, out_stokesQ.shape)
-        noisy_U = out_stokesU + np.random.normal(0, noise_level, out_stokesU.shape)
-        noisy_V = out_stokesV + np.random.normal(0, noise_level, out_stokesV.shape)
-
-        originals = [out_stokesI, out_stokesQ, out_stokesU, out_stokesV]
-        noisys = [noisy_I, noisy_Q, noisy_U, noisy_V]
-
-        fig, axes = pl.subplots(2, 2, figsize=(12, 8))
-        fig.suptitle(f"Noise effect -- sample index {idx} (noise={noise_level})")
-        axes = axes.flatten()
-
-        for s in range(4):
-            ax = axes[s]
-            ax.plot(originals[s], color='black', linewidth=1.5, label='Original')
-            ax.plot(noisys[s],    color='red',   linewidth=1.0,
-                    linestyle='--', alpha=0.8, label=f'+ noise ({noise_level})')
-            ax.set_title(f"Stokes {stokes_labels[s]}")
-            ax.set_xlabel("Wavelength index")
-            ax.set_ylabel("Continuum-normalized intensity")
-            ax.legend(fontsize=8)
-
-        pl.tight_layout(rect=[0, 0, 1, 0.95])
-        pl.show()
-        pl.close()
-
 
     
 if __name__ == "__main__":
@@ -324,18 +235,10 @@ if __name__ == "__main__":
     # L: prints first sample and its size to see if the dataset has loaded correctly, Ig.
     #print(dataset[0])
     #print(len(dataset))
-    # select indices by S/N
-    #snr_indices = select_by_snr(dataset, n_per_category=10)
 
-    # plot all categories
-    #all_indices = snr_indices['high'] + snr_indices['mid'] + snr_indices['low']
-    #plot_noise_effect(dataset, all_indices, noise_level=1e-3)
-
-    # REMEMBER TO CHANGE THIS BACK BEFORE RUNNING/TRAINING ANYTHING ELSE:
-    # this is just for trials when looking at the S/R study
-    dataset_test = Dataset('stokes_testing.h5', 'models_testing.h5','good_profiles_testing.npy', n_training=None, noise=0.0)
+    #dataset_test = Dataset('stokes_testing.h5', 'models_testing.h5','good_profiles_testing.npy', n_training=None, noise=0.0)
     
-    snr_indices = select_by_snr(dataset_test, n_per_category=10)
+    #snr_indices = select_by_snr(dataset_test, n_per_category=10)
     #print(snr_indices)
 
     #all_indices = snr_indices['high'] + snr_indices['mid'] + snr_indices['low']

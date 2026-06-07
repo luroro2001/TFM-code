@@ -10,8 +10,6 @@ try:
 except:
     NVIDIA_SMI = False
 import matplotlib.pyplot as pl
-#import matplotlib
-#matplotlib.use('Agg') # test, did not fix the issue
 import sys
 import os
 #sys.path.append('../modules')
@@ -26,8 +24,6 @@ import symlog
 import glob
 from einops import rearrange
 import random 
-#import time
-#import pathlib
 from datetime import datetime
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
@@ -55,21 +51,26 @@ class CLIPLoss(nn.Module):
         return total_loss
     
 class Testing(object):
+    # Loads a trained modeland evaluates it on the test dataset
     def __init__(self, checkpoint, gpu, batch_size):
 
+        # Load training data and best checkpoint
         print(f"Loading model {checkpoint}")
         chk = torch.load(checkpoint, map_location=lambda storage, loc: storage)
+        # Store the training and validation loss histories
         self.loss = chk['loss']
         self.loss_val = chk['loss_val']
 
-        chk = torch.load(checkpoint+'.best', map_location=lambda storage, loc: storage)
+        chk = torch.load(checkpoint+'.best', map_location=lambda storage, loc: storage) # best model
 
-        self.config = chk['config']
+        self.config = chk['config'] # load configuration used to build the architecture
 
+        # Check if there is a GPU available and define the computing device (CPU or GPU)
         self.cuda = torch.cuda.is_available()
         self.gpu = gpu        
         self.device = torch.device(f"cuda:{self.gpu}" if self.cuda else "cpu")
 
+        # If NVITOP is installed, use it to monitor GPU usage
         if (NVIDIA_SMI):
             try:
                 self.handle = Device.all()[self.gpu]
@@ -83,6 +84,7 @@ class Testing(object):
                 self.device = torch.device("cpu")
                 self.handle = None
 
+        # Define the batch size and if decoders are used
         self.batch_size = batch_size
         self.decoders = self.config['training']['use_decoders']
         
@@ -99,6 +101,7 @@ class Testing(object):
         #                             n_hidden=self.hyperparameters['mlp']['num_layers_mlp'],
         #                             activation=nn.ReLU()).to(self.device)
         
+        # Define the nueral networks (encoders and decoders)
         self.encoder_models = resnet.ResidualNet(in_features=6*80, 
                       out_features=self.config['mlp']['latent_dim'],
                       hidden_features=self.config['mlp']['n_hidden_mlp'],
@@ -132,7 +135,8 @@ class Testing(object):
                         dropout_probability=self.config['mlp']['dropout_probability'],
                         use_batch_norm=True).to(self.device)
 
-        print("Setting weights of the model...")        
+        print("Setting weights of the model...") 
+        # Load training weights       
         self.encoder_models.load_state_dict(chk['encoder_models_dict'])
         self.encoder_stokes.load_state_dict(chk['encoder_stokes_dict'])
 
@@ -147,15 +151,13 @@ class Testing(object):
             self.decoder_models.eval()
             self.decoder_stokes.eval()
 
-        # L: ADDED THIS TO "FIX" THE UNITS IN GRAPHS
-
-        # Denormalization bounds for model parameters (one per component)
+        # Denormalization bounds for model parameters (added for plots)
         self.model_lower = [2000., 0.0, -10.0, 0.0, -1000.0, -1000.0]
         self.model_upper = [25000., 3.0, 10.0, 1000.0, 1000.0, 1000.0]
         self.model_units = ["K", "km/s", "km/s", "G", "G", "G"]
 
 
-        # Denormalization bounds for Stokes parameters
+        # Denormalization bounds for Stokes parameters (added for plots)
         self.stokes_lower = [0.8,  -1e-2, -1e-2, -5e-2]
         self.stokes_upper = [1.2,   1e-2,  1e-2,  5e-2]
         self.stokes_units = ["I/I$_c$", "Q/I$_c$", "U/I$_c$", "V/I$_c$"]
@@ -183,8 +185,10 @@ class Testing(object):
                 
     def test(self):
 
+        # Use four workers to load the data
         kwargs = {'num_workers': 4, 'pin_memory': True} if self.cuda else {}
 
+        # Testing dataset
         self.test_dataset = dataset.Dataset('stokes_testing.h5', 
                                                    'models_testing.h5', 
                                                    'good_profiles_testing.npy',
@@ -207,6 +211,8 @@ class Testing(object):
         with torch.no_grad():
 
             for batch_idx, (stokes, models) in enumerate(t):
+
+                # Move data to the computing device (GPU or CPU)
                 models = models.to(self.device) # shape (batch size, 6, 80)
                 stokes = stokes.to(self.device) # shape (batch size, 4, 112) 
 
@@ -224,6 +230,7 @@ class Testing(object):
                 stokes_flat = rearrange(stokes, 'b c h -> b (c h)')
                 models_flat = rearrange(models, 'b c h -> b (c h)')
 
+                # Use encoder to get z_stokes and z_models
                 z_s = self.encoder_stokes(stokes_flat)
                 z_m = self.encoder_models(models_flat)
 
@@ -254,9 +261,6 @@ class Testing(object):
         decoded_models_all = np.concatenate(decoded_models_all, axis=0) if self.decoders else None
         decoded_stokes_all = np.concatenate(decoded_stokes_all, axis=0) if self.decoders else None
 
-        # (THIS DENORMALIZATION CAUSES THE MODEL PARAMS TO BE IN PHYSICAL UNITS IN THE PLOT)
-        #models_all = self.denormalize(models_all)
-        #decoded_models_all = self.denormalize(decoded_models_all) if self.decoders else None
 
         return z_stokes, z_models, models_all, stokes_all, decoded_models_all, decoded_stokes_all
 
@@ -318,7 +322,6 @@ class Testing(object):
         """
         Joint t-SNE projection of z_stokes and z_models.
         Both latent spaces are embedded into the same 2D space.
-        one panel per physical parameter — all sharing the same 2D embedding geometry.
         The t-SNE is computed once and reused across all panels; only the colormap changes.
         param: one of ["T", "vmic", "v", "Bx", "By", "Bz"]
         height_idx: atmospheric depth index (0-79)
@@ -332,14 +335,17 @@ class Testing(object):
         if params is None:
             params = ["T", "vmic", "v", "Bx", "By", "Bz"]
 
-        # ------------------------------------------------------------------
         # Step 1: compute the joint t-SNE embedding once
         # Both latent spaces are concatenated so that Stokes and model encoder
-        # points are embedded into the same 2D geometry.
-        # ------------------------------------------------------------------
-        print("Computing joint t-SNE embedding (runs once for all parameters)...")
+        # points are embedded into the same 2D
 
-        z_all = np.concatenate([z_stokes, z_models], axis=0)  # (2N, latent_dim)
+        print("Computing t-SNE projection...")
+
+        z_all = np.concatenate([z_stokes, z_models], axis=0)  # shape: (2N, latent_dim)
+
+        # pptional PCA pre-reduction (which is suggested in the documentation)
+        # source: https://scikit-learn.org/stable/modules/generated/sklearn.manifold.TSNE.html
+        # NOTA: I disabled it (no longer default) because it didn't really make a difference
 
         if use_pca and z_all.shape[1] > 50:
             print("Applying PCA: reducing to 50 dims before t-SNE...")
@@ -349,16 +355,15 @@ class Testing(object):
                     learning_rate="auto", random_state=42)
         z_2d = tsne.fit_transform(z_all)  # (2N, 2)
 
+        # split back for the plot
         N = len(z_stokes)
         z_stokes_2d = z_2d[:N]   # (N, 2)
         z_models_2d = z_2d[N:]   # (N, 2)
 
         print("t-SNE done. Plotting...")
 
-        # ------------------------------------------------------------------
-        # Step 2: 2x3 grid — one panel per parameter, geometry fixed,
-        # only the colormap values change between panels.
-        # ------------------------------------------------------------------
+        # Step 2: plot the space
+
         n_params = len(params)
         n_cols = 2
         n_rows = 3  # 3x2 fills a portrait page cleanly
@@ -406,7 +411,7 @@ class Testing(object):
         for j in range(n_params, len(axes)):
             axes[j].set_visible(False)
 
-        #fig.suptitle(f"Joint latent space (t-SNE)  —  perplexity={perplexity}", fontsize=13)
+        #fig.suptitle(f"Joint latent space (t-SNE), perplexity={perplexity}", fontsize=13)
         pl.tight_layout(rect=[0, 0, 1, 0.97])
 
         if not hasattr(self, 'output_dir'):
@@ -627,7 +632,7 @@ class Testing(object):
             pl.close()
 
         # ------------------------------------------------------------------
-        # Figure 2: Residual distributions — 2x2 layout, physical units
+        # Figure 2: Residual distributions 
         # ------------------------------------------------------------------
         fig, axes = pl.subplots(2, 2, figsize=(12, 8))
         axes = axes.flatten()
@@ -659,7 +664,7 @@ class Testing(object):
         pl.close()
 
         # ------------------------------------------------------------------
-        # Figure 3: RMS bar chart in physical units
+        # Figure 3: RMS bar chart 
         # ------------------------------------------------------------------
         fig, ax = pl.subplots(figsize=(7, 5))
         bars = ax.bar(stokes_labels, rms_phys_per_component,
@@ -890,7 +895,7 @@ class Testing(object):
             pl.close()
 
         # ------------------------------------------------------------------
-        # Figure 2: Residual distributions — 2x3 layout, physical units
+        # Figure 2: Residual distributions 
         # ------------------------------------------------------------------
         fig, axes = pl.subplots(2, 3, figsize=(15, 9))
         axes = axes.flatten()
@@ -924,7 +929,7 @@ class Testing(object):
         pl.close()
 
         # ------------------------------------------------------------------
-        # Figure 3: RMS bar chart in physical units
+        # Figure 3: RMS bar chart 
         # ------------------------------------------------------------------
         unit_labels = [f"{lb}\n[{u}]" for lb, u in
                     zip(["T", "v$_\mathrm{mic}$", "v",
@@ -967,18 +972,6 @@ class Testing(object):
 #    print(wav.shape)
 #    print(wav)
 
-f_stokes = h5py.File('../database/stokes_training.h5', 'r')
-f_model  = h5py.File('../database/models_training.h5', 'r')
-ind      = np.load('../database/good_profiles_training.npy')
-
-print("Stokes dataset shape (raw):", f_stokes['spec1']['stokes'].shape)
-print("Model dataset shape (raw):", f_model['model'].shape)
-print("Good profiles index length (training):", len(ind))
-
-ind_val  = np.load('../database/good_profiles_validation.npy')
-ind_test = np.load('../database/good_profiles_testing.npy')
-print("Good profiles index length (validation):", len(ind_val))
-print("Good profiles index length (test):", len(ind_test))
 
 if (__name__ == '__main__'):
 
@@ -1031,16 +1024,11 @@ if (__name__ == '__main__'):
     #deepnet.plot_tsne_joint(z_stokes, z_models, models, height_idx=40, use_pca=False, depth_avg=False)
     #deepnet.plot_tsne_joint(z_stokes, z_models, models, height_idx=60, use_pca=False, depth_avg=False)
 
-    groups = {
-    'high':   [5413, 3426, 4347, 5637, 2719, 4993, 4976, 5996, 3959, 400],
-    'median': [2298, 2622, 2600, 2734, 3420, 2232, 3252, 1539, 4333, 1192],
-    'low':    [521, 1053, 4895, 3636, 427, 3296, 5170, 987, 3633, 2380],
-    }
+    #groups = {
+    #'high':   [5413, 3426, 4347, 5637, 2719, 4993, 4976, 5996, 3959, 400],
+    #'median': [2298, 2622, 2600, 2734, 3420, 2232, 3252, 1539, 4333, 1192],
+    #'low':    [521, 1053, 4895, 3636, 427, 3296, 5170, 987, 3633, 2380],
+    #}
 
-    rms_by_group = deepnet.compute_rms_by_snr_group(
-        stokes, models,
-        synthesis_results, inversion_results,
-        groups
-    )
 
 

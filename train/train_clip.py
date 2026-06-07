@@ -24,7 +24,6 @@ import argparse
 from einops import rearrange
 from PIL import Image, ImageDraw # L: had to add it
 
-#NVITOP = False # L: added
 
 """
 Summary:
@@ -64,7 +63,7 @@ def merge_images(image_batch, size, labelsy=None, labelsx=None):
 class CLIPLoss(nn.Module):
     """
     Simple contrastive loss for CLIP
-    DUDA: attempt to get a deeper understanding.
+    L: see explanation in my notes.
     """
     def __init__(self):
         super().__init__()        
@@ -195,9 +194,9 @@ class Training(nn.Module):
                         dropout_probability=self.config['mlp']['dropout_probability'],
                         use_batch_norm=True).to(self.device)
         
-        # L: this creates  a scalar learnable parameter initialized to log(1/0.07)
+        # L: this creates  a scalar learnable parameter initialized to log(1/0.07) (like in the CLIP paper)
         # in forward pass they use F.softplus(self.logit_scale) to map it to a positive value                
-        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))#)
+        self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
         # self.logit_scale = torch.ones([]) * np.log(1 / 0.07)
 
         # L: prints num. of trainable parameters         
@@ -419,6 +418,7 @@ class Training(nn.Module):
         return
 
     def validate(self):
+        # L: this follows the same procedure but disables gradient computation and parameter updates.
         # L: put models in evaluation mode 
         self.encoder_stokes.eval()
         self.encoder_models.eval()
